@@ -1,0 +1,17 @@
+.env
+.venv/
+.codex-logs/
+.pycache_runtime/
+backend/.env
+backend/venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/logs/
+*.db
+*.db-journal
+backend/uploads/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+**/__pycache__/
+**/*.pyc

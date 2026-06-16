@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+alembic
+PyJWT
+python-multipart
+pytesseract
+rapidocr-onnxruntime
+chromadb
+sentence-transformers
+pypdf
+pydantic-settings
+pillow
+python-dotenv
