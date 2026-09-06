@@ -12,7 +12,12 @@ from rag.db.models import ClaimVerificationAudit
 from rag.domain import ParsedPolicyRule, RetrievalHit
 from rag.exceptions import ClaimVerificationError
 from rag.repositories.verification_repository import VerificationRepository
-from rag.schemas.verification import ClaimVerificationRequest, ClaimVerificationResponse, GPTDecisionAssessment, PolicyRetrievalHit
+from rag.schemas.verification import (
+    ClaimVerificationRequest,
+    ClaimVerificationResponse,
+    GPTDecisionAssessment,
+    PolicyRetrievalHit,
+)
 from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.retrieval_service import PolicyRetrievalService
 from rag.services.rule_parser import RuleParser
@@ -208,7 +213,9 @@ class ClaimVerificationService:
                 reason=gpt_raw["reason"],
                 risk_flags=gpt_raw["risk_flags"],
             )
-            decision_trace.append(f"GPT adjudication: {gpt_assessment.decision} ({gpt_assessment.confidence:.2f})")
+            decision_trace.append(
+                f"GPT adjudication: {gpt_assessment.decision} ({gpt_assessment.confidence:.2f})"
+            )
             if gpt_assessment.risk_flags:
                 decision_trace.append(f"GPT risk flags: {', '.join(gpt_assessment.risk_flags)}")
 
