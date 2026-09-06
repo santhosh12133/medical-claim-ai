@@ -1,179 +1,364 @@
 # Medical Claim AI
 
-A production-oriented full-stack medical claim processing system combining asynchronous OCR, deterministic validation, explainable RAG-based policy verification, and a guarded agentic decision engine.
+> **AI-assisted medical reimbursement processing with asynchronous document intelligence, policy-grounded verification, guarded autonomous decisioning, and human-review controls.**
 
-## Documentation
+[![Backend CI](https://img.shields.io/github/actions/workflow/status/santhosh12133/medical-claim-ai/python-package.yml?label=backend%20CI)](https://github.com/santhosh12133/medical-claim-ai/actions)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![React](https://img.shields.io/badge/React-18-61DAFB)
+![FastAPI](https://img.shields.io/badge/FastAPI-production-009688)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-4169E1)
+![Docker](https://img.shields.io/badge/Docker-supported-2496ED)
 
-- [Production Deployment](docs/production-deployment.md) — Docker, environments, migrations, workers, backups, health checks, scaling and rollback
-- [System Architecture](docs/system-architecture.md) — components, data ownership, request flow, scaling and failure boundaries
-- [Security Guide](docs/security.md) — authentication, authorization, uploads, secrets, CORS, AI safety and privacy controls
-- [Operations Runbook](docs/operations-runbook.md) — deployment, health checks, incidents, worker failures and rollback
-- [API Reference](docs/api-reference.md) — endpoint groups, processing states and error semantics
-- [RAG Architecture](docs/phase2_rag_architecture.md) — policy ingestion, embeddings, retrieval, rule parsing and verification
+Medical Claim AI is a production-oriented full-stack application that turns medical reimbursement documents into structured, policy-aware claim decisions. It deliberately separates OCR, deterministic validation, retrieval-augmented policy verification, optional GPT assessment, and final decision safety gates so that model uncertainty can become **human review** instead of an unsafe automated outcome.
 
-## Stack
+---
 
-- Frontend: React + Vite + Nginx
-- Backend: FastAPI + Uvicorn
-- Database: PostgreSQL via SQLAlchemy + Alembic
-- OCR: pytesseract + RapidOCR + Pillow
-- RAG: ChromaDB + Sentence Transformers
-- Policy parsing: deterministic rule extraction with confidence scoring
-- AI adjudication: GPT-assisted assessment with deterministic safety constraints
-- Async processing: database-backed queue with concurrent worker processes
-- Deployment: Docker + Docker Compose
+## Contents
 
-## Features
+- [Why this project](#why-this-project)
+- [Platform at a glance](#platform-at-a-glance)
+- [Core workflow](#core-workflow)
+- [Architecture](#architecture)
+- [Decision safety model](#decision-safety-model)
+- [Key capabilities](#key-capabilities)
+- [Technology stack](#technology-stack)
+- [Repository structure](#repository-structure)
+- [Documentation](#documentation)
+- [Local development](#local-development)
+- [Docker deployment](#docker-deployment)
+- [API overview](#api-overview)
+- [Testing and evaluation](#testing-and-evaluation)
+- [Security](#security)
+- [Observability and operations](#observability-and-operations)
+- [Performance claims policy](#performance-claims-policy)
+- [Production readiness](#production-readiness)
+- [Project status](#project-status)
+- [Engineering principles](#engineering-principles)
+
+---
+
+## Why this project
+
+Medical reimbursement processing combines messy documents with business rules that need to be traceable. A useful automation system therefore needs more than OCR or a generative model.
+
+This project treats the workflow as a layered system:
+
+1. **Extract** information from the document.
+2. **Validate** critical claim fields deterministically.
+3. **Retrieve** relevant policy evidence.
+4. **Interpret** explicit reimbursement rules deterministically.
+5. **Assess** with GPT only when enabled and only from supplied evidence.
+6. **Gate** the final decision using confidence, amount, conflict and human-review controls.
+7. **Audit** the outcome so an operator can understand what happened.
+
+The result is intended to be explainable, testable and deployable rather than an opaque "AI approved it" workflow.
+
+---
+
+## Platform at a glance
+
+```text
+                    MEDICAL CLAIM AI
+
+Employee Browser
+      |
+      | secure claim upload
+      v
++-------------------+          +-------------------+
+| React + Vite      |          | Admin UI          |
+| Employee Workflow |          | Review / Policies |
++---------+---------+          +---------+---------+
+          |                              |
+          +---------------+--------------+
+                          |
+                          v
+                +-------------------+
+                | FastAPI API       |
+                | Auth / Claims /   |
+                | RAG / Admin       |
+                +---------+---------+
+                          |
+            +-------------+-------------+
+            |                           |
+            v                           v
+      +-----------+              +--------------+
+      | PostgreSQL|              | Claim Worker |
+      | source of |              | OCR / RAG /  |
+      | truth     |              | verification |
+      +-----------+              +------+-------+
+                                         |
+                              +----------+----------+
+                              |                     |
+                              v                     v
+                         +---------+          +-----------+
+                         | Chroma  |          | Optional  |
+                         | Vectors |          | GPT       |
+                         +---------+          +-----------+
+```
+
+---
+
+## Core workflow
+
+### Claim intake
+
+```text
+Employee
+  -> authenticate
+  -> upload image/PDF
+  -> server validates signature + size
+  -> claim persisted as queued
+  -> submission event recorded
+  -> API returns
+```
+
+### Background processing
+
+```text
+Worker
+  -> claims queued row with database locking
+  -> OCR
+  -> structured field extraction
+  -> deterministic validation
+  -> persist processing result
+  -> optional policy verification
+  -> final decision / human review
+  -> audit + claim events
+```
+
+### Policy verification
+
+```text
+Policy PDF
+  -> validate
+  -> parse text
+  -> chunk
+  -> embed
+  -> ChromaDB
+  -> active policy metadata in PostgreSQL
+
+Claim
+  -> metadata-aware retrieval
+  -> similarity threshold
+  -> deterministic rule parser
+  -> deterministic baseline
+  -> optional GPT assessment
+  -> guarded decision engine
+```
+
+---
+
+## Architecture
+
+### Service boundaries
+
+| Component | Responsibility | Scaling unit |
+|---|---|---|
+| Frontend | Employee/admin experience | Static web deployment / CDN |
+| API | HTTP, auth, claim intake, admin/RAG APIs | API replica |
+| Claim worker | OCR, extraction, validation, verification | Worker replica |
+| PostgreSQL | Transactional state and audit | Managed database |
+| ChromaDB | Policy vector index | Vector service / host |
+| File storage | Claim and policy documents | Persistent volume / object storage |
+| GPT provider | Optional constrained assessment | External API dependency |
+
+### Source of truth
+
+PostgreSQL is authoritative for users, claims, claim events, policy metadata, processing state and verification audits. ChromaDB is a retrieval index, not the business-system source of truth.
+
+### Failure isolation
+
+A slow OCR job must not block an HTTP request. A GPT timeout must not erase a claim. Missing policy evidence must not be converted into an invented answer. The architecture intentionally makes these boundaries explicit.
+
+For the detailed architecture, see [`docs/system-architecture.md`](docs/system-architecture.md).
+
+---
+
+## Decision safety model
+
+The most important engineering property is the decision boundary:
+
+```text
+                    Retrieved Policy Evidence
+                               |
+                               v
+                       Deterministic Rules
+                               |
+                               v
+                     Deterministic Baseline
+                               |
+                    +----------+----------+
+                    |                     |
+             GPT optional          No GPT / unavailable
+                    |                     |
+                    +----------+----------+
+                               |
+                               v
+                    ClaimDecisionEngine
+                               |
+              +----------------+----------------+
+              |                |                |
+              v                v                v
+          APPROVED         REJECTED       HUMAN_REVIEW
+```
+
+Guardrails include:
+
+- configurable minimum deterministic confidence
+- configurable autonomous maximum amount
+- optional requirement that GPT be available
+- conflict detection
+- GPT confidence gate
+- approved-amount ceiling
+- human-review escalation
+- structured risk flags
+- persistent verification audit
+
+GPT cannot create unsupported policy facts or increase the deterministic reimbursement ceiling.
+
+See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
+
+---
+
+## Key capabilities
 
 ### Employee
 
-- Secure login and authenticated claim ownership
-- Upload medical bill images or PDFs
-- Fast asynchronous claim intake; OCR runs outside the API request path
-- View claim status and policy decision summary
+- authenticated claim submission
+- image/PDF upload
+- asynchronous processing status
+- claim history
+- policy decision summary
 
-### Admin
+### Administrator
 
-- View claims and review outcomes
-- Approve or reject claims
-- Ingest policy PDFs with metadata and effective dates
-- Filter policy documents by lifecycle status
-- Activate, deactivate, or archive policy versions
-- Inspect policy chunks and verification audit history
-- View autonomous decision, confidence, human-review, and processing metrics
+- claim search and review
+- manual approval/rejection
+- policy ingestion and lifecycle management
+- verification audit history
+- decision and processing metrics
+- claim activity timeline
 
-### AI / Automation
+### Intelligence and automation
 
-- Multi-engine OCR extraction
-- Deterministic claim validation
-- Semantic policy retrieval with configurable similarity threshold
-- Treatment/department-aware policy retrieval
-- Duplicate policy detection using SHA-256 content fingerprints
-- Policy version and effective-date tracking
-- GPT assessment restricted to retrieved policy evidence
-- Guarded agentic decision engine with confidence, amount, conflict, and human-review gates
-- Persistent verification audit records and risk flags
-- Retryable asynchronous OCR/validation worker with bounded attempts
+- multi-engine OCR stack
+- deterministic field validation
+- semantic policy retrieval
+- treatment/department-aware filtering
+- policy lifecycle and version tracking
+- SHA-256 duplicate policy detection
+- deterministic reimbursement-rule parsing
+- optional evidence-constrained GPT assessment
+- guarded autonomous decision engine
+- human-review escalation
 
-## Project Structure
+---
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React, Vite, React Router, Axios |
+| Web serving | Nginx |
+| API | FastAPI, Uvicorn |
+| Database | PostgreSQL, SQLAlchemy, Alembic |
+| OCR | pytesseract, RapidOCR, Pillow |
+| Documents | pypdf |
+| Embeddings | Sentence Transformers |
+| Vector search | ChromaDB |
+| AI assessment | OpenAI Responses API integration |
+| Authentication | JWT + PBKDF2-HMAC-SHA256 password hashing |
+| Background processing | PostgreSQL-backed worker queue |
+| Containers | Docker + Docker Compose |
+| CI | GitHub Actions |
+
+---
+
+## Repository structure
 
 ```text
 medical-claim-ai/
-  frontend/
-  backend/
-    alembic/
-    ocr/
-    rag/
-    scripts/
-    tests/
-  docs/
-  docker-compose.yml
-  README.md
+├── backend/
+│   ├── alembic/                  # Database migrations
+│   ├── ocr/                     # OCR and extraction pipeline
+│   ├── rag/                     # Policy/RAG/decision services
+│   ├── scripts/                 # Worker, seed and benchmark tools
+│   ├── tests/                   # Backend automated tests
+│   ├── main.py                  # FastAPI application
+│   ├── models.py                # Core ORM models
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   │   ├── pages/               # Employee/admin screens
+│   │   ├── components/          # Shared UI components
+│   │   └── api.js               # API client/auth integration
+│   ├── Dockerfile
+│   └── nginx.conf
+│
+├── docs/                        # Engineering documentation system
+├── docker-compose.yml            # Reference multi-service deployment
+├── backend/Dockerfile
+├── .env.docker.example
+├── .github/workflows/            # CI
+└── README.md
 ```
 
-## Docker Deployment
+---
 
-The repository includes a four-service production-style Compose stack:
+## Documentation
 
-```text
-Browser -> Nginx/React -> FastAPI -> PostgreSQL
-                         |
-                         +-> background claim worker
-                         +-> ChromaDB persistent volume
-                         +-> upload/policy persistent volumes
-```
+The [`docs/`](docs/README.md) directory is the engineering documentation hub.
 
-### 1. Configure secrets
+### Product and architecture
 
-Copy `.env.docker.example` to `.env` and replace the placeholder database password and application secret with strong random values. Keep `.env` out of Git.
+- [`Product & System Overview`](docs/product-system-overview.md) — scope, requirements, personas, terminology, lifecycle and system boundaries
+- [`System Architecture`](docs/system-architecture.md) — components, data ownership, request flows, scaling and failure boundaries
+- [`Architecture Decision Records`](docs/architecture-decision-records.md) — important technical decisions and trade-offs
 
-### 2. Build and start
+### API, data and AI
 
-From the repository root:
+- [`API Reference`](docs/api-reference.md) — endpoint groups, processing states and error semantics
+- [`Data Model & Lifecycle`](docs/data-model.md) — entities, relationships, state machines, persistence and retention
+- [`AI Decisioning`](docs/ai-decisioning.md) — OCR, retrieval, deterministic policy logic, GPT and safety gates
+- [`RAG Architecture`](docs/phase2_rag_architecture.md) — policy ingestion, embeddings, retrieval and verification implementation
 
-```bash
-docker compose build
-docker compose up -d
-```
+### Security and operations
 
-The API container applies Alembic migrations before starting Uvicorn. The worker starts only after the API readiness check succeeds. PostgreSQL data, uploaded claims, policy documents, Chroma data, and logs are stored in named Docker volumes so container restarts do not erase application state.
+- [`Security Architecture`](docs/security.md) — authentication, authorization, upload security, secrets, AI safety and privacy
+- [`Production Deployment`](docs/production-deployment.md) — Docker, migrations, workers, backups, scaling and rollback
+- [`Operations Runbook`](docs/operations-runbook.md) — operational procedures and incidents
+- [`Troubleshooting`](docs/troubleshooting.md) — symptom-driven recovery guide
 
-### 3. Verify the deployment
+### Quality and governance
 
-```bash
-docker compose ps
-docker compose logs --tail=100 api
-docker compose logs --tail=100 worker
-```
+- [`Testing & Validation`](docs/testing.md) — test pyramid, AI evaluation and release gate
+- [`Performance & Capacity`](docs/performance.md) — benchmark boundaries and capacity methodology
+- [`Production Readiness`](docs/production-readiness.md) — explicit release gates and sign-off evidence
+- [`Traceability & Evidence`](docs/traceability.md) — implementation-to-test-to-release traceability
 
-Health endpoints:
+---
 
-```text
-http://localhost:8000/health
-http://localhost:8000/health/ready
-```
-
-Open the web application at:
-
-```text
-http://localhost:8080
-```
-
-### 4. Stop or restart
-
-```bash
-docker compose down
-docker compose up -d
-```
-
-Do **not** use `docker compose down -v` unless you intentionally want to delete the PostgreSQL database and persistent application data.
-
-### Production deployment notes
-
-- Put TLS/HTTPS in front of the frontend and API.
-- Set `CORS_ORIGINS` to the exact public frontend origin; do not use `*` with credentials.
-- Store `SECRET_KEY`, database credentials, and `OPENAI_API_KEY` in the deployment platform's secret manager rather than in Git.
-- Use a managed PostgreSQL instance for serious production workloads and configure backups/PITR.
-- Keep the API and worker as separate scalable processes. Increase worker replicas for OCR throughput rather than blocking API requests.
-- The current queue is PostgreSQL-backed. At higher scale, it can be replaced with a managed Redis/queue without changing the claim-processing API contract.
-- Use object storage for claim/policy files when multiple hosts or worker replicas require shared storage.
-- Keep autonomous decisions disabled until representative OCR, policy, and end-to-end validation results have been measured.
-
-## Quick Start Without Docker
+## Local development
 
 ### Backend
 
-1. Create and activate a virtual environment.
-2. Install the Python dependencies from `backend/requirements.txt`.
-3. Configure environment variables from `backend/.env.example`.
-4. Apply database migrations:
-
 ```bash
+cd backend
+python -m venv .venv
+# activate the virtual environment
+pip install -r requirements.txt
+cp .env.example .env
 python scripts/bootstrap_db.py
-```
-
-5. Seed demo auth users:
-
-```bash
 python scripts/seed_demo_users.py
-```
-
-6. Start the API:
-
-```bash
 uvicorn main:app --reload
 ```
 
-7. Start the claim worker in a separate terminal/process:
+Start the worker separately:
 
 ```bash
+cd backend
 python scripts/claim_worker.py
-```
-
-For a single controlled batch:
-
-```bash
-python scripts/claim_worker.py --once --batch-size 8
 ```
 
 ### Frontend
@@ -184,146 +369,230 @@ npm ci
 npm run dev
 ```
 
-## API Overview
+The detailed environment and deployment instructions live in [`docs/production-deployment.md`](docs/production-deployment.md).
+
+---
+
+## Docker deployment
+
+The repository includes a reference Docker Compose topology with frontend, API, PostgreSQL and worker services plus persistent application data volumes.
+
+```bash
+cp .env.docker.example .env
+# edit secrets/configuration
+
+docker compose build
+docker compose up -d
+```
+
+Verify:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 api
+docker compose logs --tail=100 worker
+```
+
+API checks:
+
+```text
+http://localhost:8000/health
+http://localhost:8000/health/ready
+```
+
+Frontend:
+
+```text
+http://localhost:8080
+```
+
+Do not use `docker compose down -v` for routine restarts because it removes persistent volumes.
+
+For production deployment procedures, see [`docs/production-deployment.md`](docs/production-deployment.md).
+
+---
+
+## API overview
 
 ### Authentication
 
-- `POST /auth/login`
-- `GET /auth/me`
+```text
+POST /auth/login
+GET  /auth/me
+```
 
 ### Claims
 
-- `POST /claims/upload` — stores the upload and queues asynchronous processing
-- `GET /claims`
-- `GET /claims/{claim_id}`
-- `GET /claims/{claim_id}/events`
-- `PATCH /claims/{claim_id}/approve`
-- `PATCH /claims/{claim_id}/reject`
-
-### RAG / Policies
-
-- `POST /rag/policies/ingest`
-- `GET /rag/policies`
-- `GET /rag/policies/{policy_document_id}`
-- `PATCH /rag/policies/{policy_document_id}/status`
-- `POST /rag/claims/verify`
-- `POST /rag/claims/{claim_id}/verify`
-- `GET /rag/verifications`
-- `GET /rag/metrics/decisions`
-
-All RAG administration endpoints require an authenticated admin user.
-
-## Agentic Decision Flow
-
 ```text
-Claim
-  -> asynchronous OCR + field extraction
-  -> deterministic validation
-  -> policy retrieval
-  -> reimbursement-rule parsing
-  -> deterministic baseline decision
-  -> optional GPT evidence-based assessment
-  -> ClaimDecisionEngine
-       |-- confidence gate
-       |-- maximum amount gate
-       |-- GPT availability/requirement gate
-       |-- conflict gate
-       |-- approved-amount ceiling
-       '-- HUMAN_REVIEW escalation
-  -> audit record + claim decision
+POST  /claims/upload
+GET   /claims
+GET   /claims/{claim_id}
+GET   /claims/{claim_id}/events
+PATCH /claims/{claim_id}/approve
+PATCH /claims/{claim_id}/reject
 ```
 
-The agentic engine is deliberately conservative: missing evidence, low confidence, conflicting decisions, excessive amounts, or required-but-unavailable GPT assessment result in human review rather than an unsafe autonomous approval.
+### Policies and verification
 
-## Async Processing
+```text
+POST  /rag/policies/ingest
+GET   /rag/policies
+GET   /rag/policies/{policy_document_id}
+PATCH /rag/policies/{policy_document_id}/status
+POST  /rag/claims/verify
+POST  /rag/claims/{claim_id}/verify
+GET   /rag/verifications
+GET   /rag/metrics/decisions
+```
 
-Claim uploads return after the document is safely stored and a database-backed queue record is created. `scripts/claim_worker.py` claims queued jobs using row-level locking, performs OCR and validation, retries transient failures up to a bounded attempt count, and can invoke policy verification automatically when autonomous decisions are enabled.
+All policy administration and verification-management endpoints require authenticated administrator access.
 
-This separates API latency from OCR/AI latency and allows horizontal worker scaling without requiring a message broker for the initial deployment. PostgreSQL row locking prevents two workers from processing the same queued claim concurrently.
+See the full contract in [`docs/api-reference.md`](docs/api-reference.md).
 
-## Benchmarking and Evaluation
+---
 
-The repository includes reproducible evaluation scripts. **Do not use benchmark targets as measured results until the scripts have been run against the intended deployment and dataset.**
+## Testing and evaluation
 
-### Decision-engine throughput
+The project uses layered verification rather than a single "works on my machine" check.
+
+### Unit / backend
 
 ```bash
 cd backend
+pytest
+```
+
+### Decision engine benchmark
+
+```bash
 python scripts/benchmark_claim_decisions.py --iterations 10000
 ```
 
-This measures the decision-engine path itself, including latency percentiles and estimated capacity. It does not prove end-to-end OCR/API capacity.
-
-### OCR extraction evaluation
+### OCR evaluation harness
 
 ```bash
 python scripts/benchmark_ocr.py --samples 100
 ```
 
-This evaluates field extraction on generated labeled documents. For a production-quality accuracy claim, replace or supplement synthetic samples with a representative labeled set of real-world document layouts.
-
-### End-to-end claim-intake load test
+### Staging intake load test
 
 ```bash
-python scripts/benchmark_e2e.py --base-url http://localhost:8000 --token YOUR_EMPLOYEE_TOKEN --requests 250 --concurrency 10
+python scripts/benchmark_e2e.py \
+  --base-url <staging-api> \
+  --token <test-token> \
+  --requests 250 \
+  --concurrency 10
 ```
 
-Run load tests only against a dedicated staging deployment. This measures the HTTP intake path after asynchronous processing is enabled. Worker completion throughput must be measured separately for a true end-to-end processing-capacity claim.
+Load testing should use a dedicated staging environment. Decision-engine throughput is not the same measurement as worker throughput, and synthetic OCR accuracy is not the same as representative production accuracy.
 
-### Manual-review measurement
+See [`docs/testing.md`](docs/testing.md) and [`docs/performance.md`](docs/performance.md).
 
-`GET /rag/metrics/decisions` reports autonomous approvals/rejections, human-review escalations, average confidence, and autonomous decision rate. The displayed manual-review reduction uses an explicit **all-manual baseline**: if every verified claim would otherwise require manual review, the percentage of claims resolved autonomously is the corresponding reduction. A stronger business claim should be validated against a labeled historical/manual-review benchmark.
+---
 
-## Policy RAG Flow
+## Security
 
-```text
-Policy PDF
-   -> PDF parsing
-   -> text chunking
-   -> Sentence Transformer embeddings
-   -> ChromaDB
+Security controls include:
 
-Claim
-   -> treatment / department metadata filtering
-   -> semantic retrieval
-   -> similarity threshold
-   -> deterministic reimbursement-rule parsing
-   -> GPT evidence assessment (optional)
-   -> guarded decision engine
-   -> PostgreSQL verification audit
-```
+- signed JWT authentication
+- role-based authorization
+- password hashing
+- upload size/signature validation
+- configurable CORS
+- environment-based secret management
+- deterministic AI safety gates
+- human-review escalation
+- claim and verification audit trails
 
-### Policy lifecycle
+The current browser client uses local access-token storage; the hardened internet-facing target is an HttpOnly, Secure, SameSite refresh/session mechanism with short-lived access credentials.
 
-Each policy can carry a version, effective date window, SHA-256 content fingerprint, and lifecycle status (`active`, `inactive`, or `archived`). Only active policies are eligible for verification; legacy vector records without status metadata remain backward compatible until re-indexed.
+See [`docs/security.md`](docs/security.md).
 
-### Safety and integrity controls
+---
 
-- PDF and claim file signature validation rather than extension-only validation
-- Configurable upload size limits
-- SHA-256 duplicate detection
-- Configurable retrieval top-K and minimum similarity
-- Treatment and department metadata filtering
-- Explicit policy lifecycle management
-- Guarded GPT output validation
-- Maximum approved-amount protection
-- Human-review escalation for ambiguity and conflicts
-- Verification and claim-processing audit trails
-- Retry limits for asynchronous processing
-- Private/generated RAG data excluded from Git
+## Observability and operations
 
-## Current Engineering Roadmap
+Important operational signals include:
 
-- [x] Agentic decision engine
-- [x] OCR evaluation harness
-- [x] Decision throughput benchmark
-- [x] Manual-review measurement endpoint
-- [x] End-to-end intake load-test harness
-- [x] Asynchronous claim worker
-- [x] Admin dashboard decision metrics
-- [x] Docker Compose deployment stack
-- [x] Production deployment/security/operations documentation
-- [ ] Run and publish measured OCR accuracy on a representative labeled dataset
-- [ ] Run and publish sustained end-to-end worker throughput/load results
-- [ ] Add production object storage and dedicated managed queue if deployment scale requires it
+- API request and error rates
+- readiness failures
+- queue depth
+- worker processing duration
+- retry count / terminal failures
+- OCR failures
+- RAG failures
+- GPT timeouts/errors
+- autonomous decision rate
+- human-review rate
+- confidence distribution
+- database connections and resource usage
 
+See [`docs/operations-runbook.md`](docs/operations-runbook.md) and [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+---
+
+## Performance claims policy
+
+The project intentionally does **not** publish synthetic benchmark outputs as production facts.
+
+Claims such as:
+
+- "90% OCR accuracy"
+- "250 claims/day"
+- "80% manual-review reduction"
+
+must be backed by a named dataset/workload, environment, benchmark command, measurement boundary and release version before being presented as measured product results.
+
+See [`docs/performance.md`](docs/performance.md) and [`docs/traceability.md`](docs/traceability.md).
+
+---
+
+## Production readiness
+
+**Current posture: production-oriented, not fully signed off.**
+
+The repository contains the application hardening, asynchronous worker architecture, RAG pipeline, guarded decision engine, Docker deployment layer and engineering documentation. Final production sign-off still requires runtime validation in the target environment, representative document evaluation, staging load testing, backup/restore verification and a security/configuration review.
+
+See [`docs/production-readiness.md`](docs/production-readiness.md).
+
+---
+
+## Project status
+
+Implemented:
+
+- [x] Authenticated employee/admin workflows
+- [x] Claim upload and ownership controls
+- [x] Asynchronous claim processing
+- [x] OCR and structured extraction
+- [x] Policy ingestion and lifecycle management
+- [x] Semantic RAG retrieval
+- [x] Deterministic reimbursement-rule parsing
+- [x] Evidence-constrained GPT assessment
+- [x] Guarded agentic decision engine
+- [x] Claim activity and verification audits
+- [x] Decision and processing metrics
+- [x] Docker/Compose deployment
+- [x] Engineering documentation system
+- [ ] Representative labeled OCR evaluation published
+- [ ] Sustained worker-capacity benchmark published
+- [ ] Production object storage / managed queue where scale requires it
+- [ ] Hardened browser refresh/session token architecture
+
+---
+
+## Engineering principles
+
+1. **Deterministic rules are the safety baseline.**
+2. **Retrieval evidence must be visible and auditable.**
+3. **Model uncertainty should become human review, not a forced answer.**
+4. **Persistent state belongs in the transactional data store, not only in memory.**
+5. **Operational failure must be observable and recoverable.**
+6. **Performance and accuracy numbers require reproducible evidence.**
+7. **Documentation must evolve with the implementation.**
+
+---
+
+## License
+
+Add the repository's intended open-source or proprietary license here before public release.
