@@ -1,8 +1,8 @@
 from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from auth import decode_access_token
 from database import get_db
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from models_user import User
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -17,9 +17,8 @@ def get_current_user(
 
     try:
         payload = decode_access_token(credentials.credentials)
-        subject = payload.get("sub")
-        user_id = int(subject)
-    except (TypeError, ValueError, KeyError, Exception) as exc:
+        user_id = int(payload["sub"])
+    except Exception as exc:  # pragma: no cover - defensive auth guard
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
     user = db.get(User, user_id)
@@ -40,8 +39,12 @@ def require_role(*allowed_roles: str):
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    return require_role("admin")(current_user)
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
 
 
 def require_employee(current_user: User = Depends(get_current_user)) -> User:
-    return require_role("employee")(current_user)
+    if current_user.role.lower() != "employee":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Employee access required")
+    return current_user
