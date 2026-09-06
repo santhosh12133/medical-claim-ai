@@ -1,0 +1,137 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: medical_claims
+      POSTGRES_USER: medical_claims
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medical_claims -d medical_claims"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - medical_claims
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://medical_claims:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/medical_claims
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
+      UPLOAD_DIR: /app/uploads
+      RAG_ENABLED: ${RAG_ENABLED:-true}
+      RAG_UPLOAD_DIR: /app/policy_uploads
+      RAG_CHROMA_PATH: /app/chroma
+      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-1200}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-150}
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.45}
+      RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0.55}
+      RAG_MAX_UPLOAD_SIZE_MB: ${RAG_MAX_UPLOAD_SIZE_MB:-20}
+      RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
+      RAG_LOG_DIR: /app/logs
+      GPT_DECISION_ENABLED: ${GPT_DECISION_ENABLED:-false}
+      GPT_DECISION_MODEL: ${GPT_DECISION_MODEL:-gpt-5.6-luna}
+      GPT_DECISION_TIMEOUT_SECONDS: ${GPT_DECISION_TIMEOUT_SECONDS:-20}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AUTO_DECISION_ENABLED: ${AUTO_DECISION_ENABLED:-false}
+      AUTO_DECISION_MIN_CONFIDENCE: ${AUTO_DECISION_MIN_CONFIDENCE:-0.85}
+      AUTO_DECISION_REQUIRE_GPT: ${AUTO_DECISION_REQUIRE_GPT:-false}
+      AUTO_DECISION_MAX_AMOUNT: ${AUTO_DECISION_MAX_AMOUNT:-}
+    volumes:
+      - claim_uploads:/app/uploads
+      - policy_uploads:/app/policy_uploads
+      - chroma_data:/app/chroma
+      - app_logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - medical_claims
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: ["python", "scripts/claim_worker.py", "--batch-size", "8", "--workers", "4", "--poll-seconds", "2", "--max-attempts", "3"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://medical_claims:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/medical_claims
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      UPLOAD_DIR: /app/uploads
+      RAG_ENABLED: ${RAG_ENABLED:-true}
+      RAG_UPLOAD_DIR: /app/policy_uploads
+      RAG_CHROMA_PATH: /app/chroma
+      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-1200}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-150}
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.45}
+      RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0.55}
+      RAG_MAX_UPLOAD_SIZE_MB: ${RAG_MAX_UPLOAD_SIZE_MB:-20}
+      RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
+      RAG_LOG_DIR: /app/logs
+      GPT_DECISION_ENABLED: ${GPT_DECISION_ENABLED:-false}
+      GPT_DECISION_MODEL: ${GPT_DECISION_MODEL:-gpt-5.6-luna}
+      GPT_DECISION_TIMEOUT_SECONDS: ${GPT_DECISION_TIMEOUT_SECONDS:-20}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AUTO_DECISION_ENABLED: ${AUTO_DECISION_ENABLED:-false}
+      AUTO_DECISION_MIN_CONFIDENCE: ${AUTO_DECISION_MIN_CONFIDENCE:-0.85}
+      AUTO_DECISION_REQUIRE_GPT: ${AUTO_DECISION_REQUIRE_GPT:-false}
+      AUTO_DECISION_MAX_AMOUNT: ${AUTO_DECISION_MAX_AMOUNT:-}
+    volumes:
+      - claim_uploads:/app/uploads
+      - policy_uploads:/app/policy_uploads
+      - chroma_data:/app/chroma
+      - app_logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - medical_claims
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - medical_claims
+
+volumes:
+  postgres_data:
+  claim_uploads:
+  policy_uploads:
+  chroma_data:
+  app_logs:
+
+networks:
+  medical_claims:
+    driver: bridge
