@@ -2,6 +2,15 @@
 
 A production-oriented full-stack medical claim processing system combining asynchronous OCR, deterministic validation, explainable RAG-based policy verification, and a guarded agentic decision engine.
 
+## Documentation
+
+- [Production Deployment](docs/production-deployment.md) — Docker, environments, migrations, workers, backups, health checks, scaling and rollback
+- [System Architecture](docs/system-architecture.md) — components, data ownership, request flow, scaling and failure boundaries
+- [Security Guide](docs/security.md) — authentication, authorization, uploads, secrets, CORS, AI safety and privacy controls
+- [Operations Runbook](docs/operations-runbook.md) — deployment, health checks, incidents, worker failures and rollback
+- [API Reference](docs/api-reference.md) — endpoint groups, processing states and error semantics
+- [RAG Architecture](docs/phase2_rag_architecture.md) — policy ingestion, embeddings, retrieval, rule parsing and verification
+
 ## Stack
 
 - Frontend: React + Vite + Nginx
@@ -313,8 +322,8 @@ Each policy can carry a version, effective date window, SHA-256 content fingerpr
 - [x] Asynchronous claim worker
 - [x] Admin dashboard decision metrics
 - [x] Docker Compose deployment stack
+- [x] Production deployment/security/operations documentation
 - [ ] Run and publish measured OCR accuracy on a representative labeled dataset
 - [ ] Run and publish sustained end-to-end worker throughput/load results
 - [ ] Add production object storage and dedicated managed queue if deployment scale requires it
 
-See `docs/phase2_rag_architecture.md` for the detailed RAG architecture, schema, endpoints, and design rationale.
