@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,12 +12,12 @@ from sqlalchemy.orm import Session
 from auth import create_access_token, verify_password
 from auth_dependencies import get_current_user, require_admin, require_employee
 from database import UPLOAD_DIR, engine, get_db
-from models import Claim
+from models import Claim, ClaimEvent
 from models_user import User
 from ocr.extract import extract_text
 from rag.api.routes import router as rag_router
 from rag.config.logging import configure_logging
-from schemas import ClaimActionResponse, ClaimRead, LoginRequest, LoginResponse, UserRead
+from schemas import ClaimActionResponse, ClaimEventRead, ClaimRead, LoginRequest, LoginResponse, UserRead
 from services.claim_validation import extract_claim_fields, validate_claim_fields
 
 configure_logging()
@@ -96,6 +97,44 @@ def get_claim(claim_id: int, current_user: User = Depends(get_current_user), db:
     return claim
 
 
+@app.get("/claims/{claim_id}/events", response_model=List[ClaimEventRead])
+def list_claim_events(claim_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    claim = db.get(Claim, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if current_user.role.lower() != "admin" and claim.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have access to this claim")
+    return (
+        db.query(ClaimEvent)
+        .filter(ClaimEvent.claim_id == claim_id)
+        .order_by(ClaimEvent.created_at.asc(), ClaimEvent.id.asc())
+        .all()
+    )
+
+
+def _record_event(
+    db: Session,
+    claim_id: int,
+    actor_user_id: int | None,
+    event_type: str,
+    message: str,
+    status_before: str | None = None,
+    status_after: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    db.add(
+        ClaimEvent(
+            claim_id=claim_id,
+            actor_user_id=actor_user_id,
+            event_type=event_type,
+            status_before=status_before,
+            status_after=status_after,
+            message=message,
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+    )
+
+
 def _validate_upload_content(filename: str, content: bytes) -> None:
     """Validate the file signature as well as the extension to reduce spoofed uploads."""
     suffix = Path(filename).suffix.lower()
@@ -118,7 +157,7 @@ async def upload_claim(
     current_user: User = Depends(require_employee),
     db: Session = Depends(get_db),
 ):
-    del employee_name  # Identity is taken from the authenticated account, never from the form.
+    del employee_name
 
     suffix = Path(file.filename or "claim-image").suffix.lower()
     allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
@@ -163,10 +202,21 @@ async def upload_claim(
             file_path=str(file_path),
         )
         db.add(claim)
+        db.flush()
+        _record_event(
+            db,
+            claim_id=claim.id,
+            actor_user_id=current_user.id,
+            event_type="CLAIM_SUBMITTED",
+            message="Claim submitted and document processed",
+            status_after=claim.status,
+            metadata={"validation_passed": is_valid},
+        )
         db.commit()
         db.refresh(claim)
         return claim
     except HTTPException:
+        db.rollback()
         file_path.unlink(missing_ok=True)
         raise
     except Exception as exc:
@@ -184,7 +234,17 @@ def approve_claim(
     claim = db.get(Claim, claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
+    previous_status = claim.status
     claim.status = "Approved"
+    _record_event(
+        db,
+        claim_id=claim.id,
+        actor_user_id=current_user.id,
+        event_type="CLAIM_APPROVED",
+        message="Claim approved by administrator",
+        status_before=previous_status,
+        status_after=claim.status,
+    )
     db.commit()
     db.refresh(claim)
     return ClaimActionResponse(message="Claim approved", claim=claim)
@@ -199,7 +259,17 @@ def reject_claim(
     claim = db.get(Claim, claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
+    previous_status = claim.status
     claim.status = "Rejected"
+    _record_event(
+        db,
+        claim_id=claim.id,
+        actor_user_id=current_user.id,
+        event_type="CLAIM_REJECTED",
+        message="Claim rejected by administrator",
+        status_before=previous_status,
+        status_after=claim.status,
+    )
     db.commit()
     db.refresh(claim)
     return ClaimActionResponse(message="Claim rejected", claim=claim)
