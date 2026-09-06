@@ -30,20 +30,24 @@ class PolicyRetrievalService:
     def retrieve(self, request: ClaimVerificationRequest, top_k: int | None = None) -> list[RetrievalHit]:
         query_text = self.build_query_text(request)
         limit = max(1, min(top_k or self.settings.rag_top_k, self.settings.rag_top_k))
-        metadata_filter = self._build_filter(request)
         try:
-            return self.vector_repository.query(query_text=query_text, top_k=limit, where=metadata_filter)
+            hits = self.vector_repository.query(query_text=query_text, top_k=limit, where=self._build_filter(request))
+            # Older vector records predate the status metadata. Treat missing status as active
+            # for backward compatibility, while explicitly inactive/archived records are excluded.
+            return [hit for hit in hits if hit.metadata.get("status", "active") == "active"]
         except Exception:
             self.logger.exception("Policy retrieval failed")
             raise
 
-    def _build_filter(self, request: ClaimVerificationRequest) -> dict[str, Any]:
-        filters: list[dict[str, str]] = [{"status": "active"}]
+    def _build_filter(self, request: ClaimVerificationRequest) -> dict[str, Any] | None:
+        filters: list[dict[str, str]] = []
         policy_type = request.policy_type or request.treatment
         if policy_type:
             filters.append({"policy_type": policy_type.strip().title()})
         if request.department:
             filters.append({"department": request.department.strip().title()})
+        if not filters:
+            return None
         if len(filters) == 1:
             return filters[0]
         return {"$and": filters}
