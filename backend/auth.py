@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
@@ -7,6 +8,7 @@ import jwt
 
 
 ALGORITHM = "HS256"
+PBKDF2_ITERATIONS = 120000
 
 
 def _secret_key() -> str:
@@ -20,16 +22,21 @@ def _secret_key() -> str:
 
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
     salt = salt or os.urandom(16).hex()
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), PBKDF2_ITERATIONS)
     return digest.hex(), salt
 
 
 def verify_password(password: str, password_hash: str, salt: str) -> bool:
     candidate_hash, _ = hash_password(password, salt)
-    return candidate_hash == password_hash
+    return hmac.compare_digest(candidate_hash, password_hash)
 
 
-def create_access_token(subject: str, role: str, expires_minutes: int = 480) -> str:
+def create_access_token(subject: str, role: str, expires_minutes: int | None = None) -> str:
+    if expires_minutes is None:
+        expires_minutes = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "60"))
+    if expires_minutes <= 0:
+        raise RuntimeError("AUTH_TOKEN_EXPIRE_MINUTES must be greater than zero")
+
     now = datetime.now(timezone.utc)
     payload: Dict[str, Any] = {
         "sub": subject,
