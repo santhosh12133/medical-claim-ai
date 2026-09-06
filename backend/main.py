@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -22,12 +23,18 @@ configure_logging()
 
 app = FastAPI(title="Medical Claim AI API")
 
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(rag_router)
@@ -86,11 +93,12 @@ async def upload_claim(
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     content = await file.read()
-    max_size = 10 * 1024 * 1024
+    max_size_mb = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
+    max_size = max_size_mb * 1024 * 1024
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
     if len(content) > max_size:
-        raise HTTPException(status_code=413, detail="File size must not exceed 10 MB")
+        raise HTTPException(status_code=413, detail=f"File size must not exceed {max_size_mb} MB")
 
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     stored_name = f"{timestamp}{suffix}"
