@@ -1,54 +1,185 @@
-# Medical Claim AI — Documentation Hub
+# Medical Claim AI — Engineering Documentation Hub
 
-> Engineering documentation for the Medical Claim AI platform.
+> The technical source of truth for product behavior, architecture, data, security, AI safety, testing, operations and release governance.
 
-This directory is the technical source of truth for how the system is designed, implemented, secured, operated, tested, and deployed.
+This documentation is intentionally structured like an engineering system of record rather than a marketing README. If the implementation changes, the relevant documentation must change with it.
+
+---
 
 ## Documentation Map
 
-| Area | Document | Purpose |
-|---|---|---|
-| Product | [Product & System Overview](product-system-overview.md) | Business problem, users, scope, capabilities, terminology, lifecycle and non-functional requirements |
-| Architecture | [System Architecture](system-architecture.md) | Components, boundaries, data ownership, request flows, scaling and failure isolation |
-| Architecture | [Architecture Decision Records](architecture-decision-records.md) | Why major technical decisions were made and what trade-offs they introduce |
-| Data | [Data Model & Lifecycle](data-model.md) | Entities, relationships, state machines, persistence rules, retention and consistency |
-| API | [API Reference](api-reference.md) | HTTP contracts, authentication, request/response semantics, errors and examples |
-| Security | [Security Architecture](security.md) | Authentication, authorization, uploads, secrets, AI guardrails, privacy and operational controls |
-| AI | [AI Decisioning](ai-decisioning.md) | OCR, policy retrieval, rule extraction, GPT assessment, confidence gates and human-review escalation |
-| AI | [RAG Architecture](phase2_rag_architecture.md) | Policy ingestion, chunking, embeddings, retrieval and verification implementation |
-| Operations | [Operations Runbook](operations-runbook.md) | Health checks, incidents, worker failures, recovery and operator procedures |
-| Deployment | [Production Deployment](production-deployment.md) | Docker, environments, migrations, scaling, backups, observability and rollback |
-| Quality | [Testing & Validation](testing.md) | Unit, integration, E2E, OCR, AI, load and release verification strategy |
-| Quality | [Performance & Capacity](performance.md) | Benchmark definitions, methodology, interpretation and publication rules |
-| Governance | [Production Readiness](production-readiness.md) | Explicit launch gates, evidence requirements, residual risks and sign-off criteria |
-| Governance | [Traceability & Evidence](traceability.md) | Mapping from requirements to implementation, tests, metrics and operational evidence |
-| Operations | [Troubleshooting](troubleshooting.md) | Symptom → diagnosis → remediation procedures |
+### 01 — Product and Requirements
 
-## How to Use This Documentation
+- [Product & System Overview](product-system-overview.md) — problem, users, scope, capabilities, functional/non-functional requirements, lifecycle and terminology
 
-**New developer:** start with [Product & System Overview](product-system-overview.md), then [System Architecture](system-architecture.md), then [Local Development](../README.md#quick-start-without-docker).
+### 02 — Architecture
 
-**API consumer:** go directly to [API Reference](api-reference.md).
+- [System Architecture](system-architecture.md) — service boundaries, data ownership, request flows, scaling and failure isolation
+- [Architecture Decision Records](architecture-decision-records.md) — important design decisions, alternatives and trade-offs
 
-**AI/ML reviewer:** read [AI Decisioning](ai-decisioning.md) and [RAG Architecture](phase2_rag_architecture.md).
+### 03 — Data and API
 
-**Security reviewer:** read [Security Architecture](security.md) and [Production Readiness](production-readiness.md).
+- [Data Model & Lifecycle](data-model.md) — entities, relationships, state machines, transactions, idempotency and retention
+- [API Reference](api-reference.md) — endpoint contracts, authentication, errors, processing states and client semantics
 
-**Release engineer / operator:** read [Production Deployment](production-deployment.md) and [Operations Runbook](operations-runbook.md).
+### 04 — AI / ML
 
-**Interviewer / technical reviewer:** start with [Product & System Overview](product-system-overview.md), [System Architecture](system-architecture.md), [AI Decisioning](ai-decisioning.md), and [Production Readiness](production-readiness.md).
+- [AI Decisioning & Safety](ai-decisioning.md) — OCR, extraction, deterministic rules, GPT assessment, decision gates and human review
+- [RAG Architecture](phase2_rag_architecture.md) — policy ingestion, chunking, embeddings, retrieval and verification implementation
 
-## Documentation Principles
+### 05 — Security and Privacy
 
-1. Documentation describes the current implementation unless a section is explicitly marked as planned or target architecture.
-2. Performance and accuracy claims are not considered factual results until they are backed by reproducible measurements.
-3. Security controls are described together with their limitations and residual risks.
-4. AI behavior is documented as a guarded decision pipeline, not as an opaque model call.
-5. Operational procedures must be executable by a person who did not implement the feature.
-6. Every material production claim should have a traceable source: code, test, benchmark, configuration, or operational evidence.
+- [Security Architecture](security.md) — authentication, authorization, uploads, secrets, privacy and AI controls
+- [Security Threat Model](security-threat-model.md) — assets, trust boundaries, threats, abuse cases and residual risks
 
-## Change Management
+### 06 — Quality and Performance
 
-When a feature changes architecture, data contracts, security behavior, operational procedures, or user-visible workflow, update the corresponding document in the same change set.
+- [Testing & Validation](testing.md) — unit, integration, E2E, AI evaluation, security testing and release gates
+- [Performance & Capacity](performance.md) — benchmark boundaries, workload definitions, scaling and publication rules
 
-For substantial architectural choices, add an entry to [Architecture Decision Records](architecture-decision-records.md). For release sign-off, update [Production Readiness](production-readiness.md) and [Traceability & Evidence](traceability.md).
+### 07 — Operations and Reliability
+
+- [Observability](observability.md) — metrics, logs, audit signals, dashboards and alerting
+- [Operations Runbook](operations-runbook.md) — daily operations, incidents, worker failures and recovery procedures
+- [Troubleshooting](troubleshooting.md) — symptom → diagnosis → remediation
+- [Disaster Recovery](disaster-recovery.md) — backup, restore, RPO/RTO and recovery drills
+
+### 08 — Deployment and Release
+
+- [Production Deployment](production-deployment.md) — Docker, environments, migrations, scaling, backups and rollback
+- [Production Readiness](production-readiness.md) — explicit launch gates and required evidence
+- [Release Management](release-management.md) — release sequencing, AI change controls, migration strategy and rollback
+
+### 09 — Engineering Governance
+
+- [Traceability & Evidence](traceability.md) — requirements → implementation → tests → deployment evidence
+- [Developer Guide](developer-guide.md) — repository orientation, change workflow, API/database/AI development rules
+- [Glossary](glossary.md) — shared technical and domain vocabulary
+
+---
+
+## Recommended Reading Paths
+
+### New engineer
+
+```text
+Product Overview
+   ↓
+System Architecture
+   ↓
+Developer Guide
+   ↓
+Data Model + API Reference
+   ↓
+Testing
+```
+
+### Backend engineer
+
+```text
+System Architecture
+   ↓
+Data Model
+   ↓
+API Reference
+   ↓
+Developer Guide
+   ↓
+Testing
+```
+
+### AI / ML engineer
+
+```text
+Product Overview
+   ↓
+AI Decisioning
+   ↓
+RAG Architecture
+   ↓
+Testing
+   ↓
+Performance
+```
+
+### Security reviewer
+
+```text
+Security Architecture
+   ↓
+Security Threat Model
+   ↓
+AI Decisioning
+   ↓
+Production Readiness
+```
+
+### DevOps / SRE
+
+```text
+System Architecture
+   ↓
+Production Deployment
+   ↓
+Observability
+   ↓
+Operations Runbook
+   ↓
+Disaster Recovery
+```
+
+### Technical interviewer / reviewer
+
+```text
+Product Overview
+   ↓
+System Architecture
+   ↓
+AI Decisioning
+   ↓
+Architecture Decision Records
+   ↓
+Production Readiness
+```
+
+---
+
+## Documentation Rules
+
+1. **Current implementation first.** Planned architecture must be explicitly labeled as planned.
+2. **No unsupported metrics.** Accuracy, throughput, latency, availability and review-reduction claims require reproducible evidence.
+3. **Security includes residual risk.** A control is documented together with what it does not protect against.
+4. **AI is a pipeline.** Model calls are documented with evidence boundaries, deterministic controls and failure behavior.
+5. **Operations must be executable.** Another engineer should be able to perform the procedure without the original author.
+6. **Architecture decisions are durable knowledge.** Material decisions belong in the ADR record.
+7. **Traceability matters.** Requirements should map to implementation and validation evidence.
+8. **Sensitive data stays out of public fixtures.** Use synthetic or authorized de-identified data only.
+
+## Documentation Change Rule
+
+When a pull request changes any of the following, update documentation in the same change set:
+
+| Change | Required documentation |
+|---|---|
+| API contract | API Reference + tests |
+| Database schema | Data Model + migration + tests |
+| Architecture boundary | System Architecture + ADR |
+| AI behavior | AI Decisioning + tests + readiness evidence |
+| Security behavior | Security + Threat Model |
+| Deployment | Production Deployment + Operations |
+| Monitoring | Observability + Operations |
+| Recovery | Disaster Recovery + Operations |
+| Performance | Performance + Traceability |
+| Release process | Release Management + Changelog |
+
+## Evidence Levels
+
+**Source** — behavior is confirmed by code/configuration.
+
+**Automated** — behavior is covered by a repeatable automated test.
+
+**Staging** — behavior is validated in a deployed multi-service environment.
+
+**Production** — behavior is validated in the authorized production environment.
+
+Do not describe source-level behavior as production validated until the higher evidence level exists.
