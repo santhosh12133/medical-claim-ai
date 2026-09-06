@@ -32,17 +32,23 @@ class ChromaPolicyVectorRepository:
         ids = [chunk.chunk_id for chunk in chunks]
         documents = [chunk.chunk_text for chunk in chunks]
         embeddings = [chunk.embedding for chunk in chunks]
-        metadatas = [chunk.metadata for chunk in chunks]
+        metadatas = [{**chunk.metadata, "status": chunk.metadata.get("status", "active")} for chunk in chunks]
         self.collection.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
         self.logger.info("Upserted %s policy chunks into Chroma", len(chunks))
 
     def update_policy_status(self, chunk_ids: Sequence[str], policy_status: str) -> None:
         if not chunk_ids:
             return
-        self.collection.update(
-            ids=list(chunk_ids),
-            metadatas=[{"status": policy_status} for _ in chunk_ids],
-        )
+        existing = self.collection.get(ids=list(chunk_ids), include=["metadatas"])
+        ids = existing.get("ids", [])
+        metadatas = existing.get("metadatas", [])
+        updated = []
+        for metadata in metadatas:
+            item = dict(metadata or {})
+            item["status"] = policy_status
+            updated.append(item)
+        if ids:
+            self.collection.update(ids=ids, metadatas=updated)
 
     def delete_chunks(self, chunk_ids: Sequence[str]) -> None:
         if not chunk_ids:
