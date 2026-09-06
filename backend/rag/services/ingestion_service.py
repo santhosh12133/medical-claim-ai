@@ -20,9 +20,16 @@ from rag.services.pdf_parser import PolicyPdfParser
 
 
 class PolicyIngestionService:
-    def __init__(self, db: Session, policy_repository: PolicyRepository, vector_repository: ChromaPolicyVectorRepository,
-                 pdf_parser: PolicyPdfParser, chunking_service: ChunkingService, embedding_service: EmbeddingService,
-                 settings: RagSettings | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        policy_repository: PolicyRepository,
+        vector_repository: ChromaPolicyVectorRepository,
+        pdf_parser: PolicyPdfParser,
+        chunking_service: ChunkingService,
+        embedding_service: EmbeddingService,
+        settings: RagSettings | None = None,
+    ) -> None:
         self.db = db
         self.policy_repository = policy_repository
         self.vector_repository = vector_repository
@@ -32,17 +39,19 @@ class PolicyIngestionService:
         self.settings = settings or get_rag_settings()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def ingest(self, pdf_path: Path, original_filename: str, metadata: PolicyMetadata) -> IngestionResult:
+    def ingest(self, pdf_path: Path, original_filename: str, metadata: PolicyMetadata) -> IngestionResult:  # noqa: C901
         vector_ids: list[str] = []
         try:
             checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
             if self.policy_repository.find_by_checksum(checksum):
                 raise PolicyIngestionError("This policy document has already been ingested")
 
-            normalized_metadata = metadata.model_copy(update={
-                "policy_type": metadata.policy_type.strip().title(),
-                "department": metadata.department.strip().title(),
-            })
+            normalized_metadata = metadata.model_copy(
+                update={
+                    "policy_type": metadata.policy_type.strip().title(),
+                    "department": metadata.department.strip().title(),
+                }
+            )
             raw_text = self.pdf_parser.extract_text(pdf_path)
             chunks = self.chunking_service.chunk_text(raw_text)
             if not chunks:
@@ -83,19 +92,37 @@ class PolicyIngestionService:
                     "department": document.department,
                     "status": "active",
                 }
-                chunk_rows.append(PolicyChunk(policy_document_id=document.id, chunk_index=index, chunk_text=chunk_text,
-                                              vector_id=vector_id, embedding_model=self.settings.rag_embedding_model,
-                                              metadata_json=chunk_metadata))
-                vector_payloads.append(PolicyChunkPayload(chunk_id=vector_id, policy_document_id=document.id,
-                                                          chunk_index=index, chunk_text=chunk_text,
-                                                          embedding=embedding, metadata=chunk_metadata))
+                chunk_rows.append(
+                    PolicyChunk(
+                        policy_document_id=document.id,
+                        chunk_index=index,
+                        chunk_text=chunk_text,
+                        vector_id=vector_id,
+                        embedding_model=self.settings.rag_embedding_model,
+                        metadata_json=chunk_metadata,
+                    )
+                )
+                vector_payloads.append(
+                    PolicyChunkPayload(
+                        chunk_id=vector_id,
+                        policy_document_id=document.id,
+                        chunk_index=index,
+                        chunk_text=chunk_text,
+                        embedding=embedding,
+                        metadata=chunk_metadata,
+                    )
+                )
 
             self.policy_repository.create_chunks(chunk_rows)
             self.vector_repository.upsert_chunks(vector_payloads)
             self.db.commit()
             self.db.refresh(document)
-            return IngestionResult(document_id=document.id, title=document.title, status=document.status,
-                                   chunk_count=len(chunk_rows))
+            return IngestionResult(
+                document_id=document.id,
+                title=document.title,
+                status=document.status,
+                chunk_count=len(chunk_rows),
+            )
         except Exception as exc:
             self.db.rollback()
             if vector_ids:
