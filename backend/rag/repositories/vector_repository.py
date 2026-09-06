@@ -29,14 +29,20 @@ class ChromaPolicyVectorRepository:
     def upsert_chunks(self, chunks: Sequence[PolicyChunkPayload]) -> None:
         if not chunks:
             return
-
         ids = [chunk.chunk_id for chunk in chunks]
         documents = [chunk.chunk_text for chunk in chunks]
         embeddings = [chunk.embedding for chunk in chunks]
         metadatas = [chunk.metadata for chunk in chunks]
-
         self.collection.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
         self.logger.info("Upserted %s policy chunks into Chroma", len(chunks))
+
+    def update_policy_status(self, chunk_ids: Sequence[str], policy_status: str) -> None:
+        if not chunk_ids:
+            return
+        self.collection.update(
+            ids=list(chunk_ids),
+            metadatas=[{"status": policy_status} for _ in chunk_ids],
+        )
 
     def delete_chunks(self, chunk_ids: Sequence[str]) -> None:
         if not chunk_ids:
@@ -51,13 +57,11 @@ class ChromaPolicyVectorRepository:
             where=where,
             include=["documents", "metadatas", "distances"],
         )
-
         hits: list[RetrievalHit] = []
         documents = results.get("documents", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
         ids = results.get("ids", [[]])[0]
-
         for chunk_id, document_text, metadata, distance in zip(ids, documents, metadatas, distances):
             similarity = max(0.0, min(1.0, 1.0 - float(distance)))
             if similarity < self.settings.rag_min_similarity:
@@ -72,5 +76,4 @@ class ChromaPolicyVectorRepository:
                     metadata=dict(metadata),
                 )
             )
-
         return hits
