@@ -3,12 +3,14 @@ import { useState } from 'react';
 import { api } from '../../api';
 import { SectionCard } from '../../components/SectionCard';
 
+const MAX_UPLOAD_SIZE_MB = 10;
+const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.webp,.pdf';
+
 export function EmployeeUploadPage() {
-  const [employeeName, setEmployeeName] = useState('Santhosh');
-  const [treatment, setTreatment] = useState('Dental');
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const onSubmit = async (event) => {
     event.preventDefault();
@@ -16,44 +18,51 @@ export function EmployeeUploadPage() {
     setResult(null);
 
     if (!file) {
-      setError('Select a medical bill image first.');
+      setError('Select a medical bill image or PDF first.');
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
+      setError(`File size must not exceed ${MAX_UPLOAD_SIZE_MB} MB.`);
       return;
     }
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('employee_name', employeeName);
-    formData.append('treatment', treatment);
 
+    setSubmitting(true);
     try {
-      const response = await api.post('/claims/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const response = await api.post('/claims/upload', formData);
       setResult(response.data);
+      setFile(null);
+      event.target.reset();
     } catch (submissionError) {
-      setError(submissionError.response?.data?.detail || 'Upload failed');
+      setError(submissionError.response?.data?.detail || 'Upload failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <SectionCard title="Upload Medical Bill" subtitle="Employee side">
+    <SectionCard title="Upload Medical Bill" subtitle="Upload a bill and let the system extract claim details automatically.">
       <form className="stack" onSubmit={onSubmit}>
         <label>
-          Employee name
-          <input value={employeeName} onChange={(event) => setEmployeeName(event.target.value)} />
+          Medical bill
+          <input
+            type="file"
+            accept={ACCEPTED_TYPES}
+            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            disabled={submitting}
+          />
         </label>
-        <label>
-          Treatment
-          <input value={treatment} onChange={(event) => setTreatment(event.target.value)} />
-        </label>
-        <label>
-          Bill image
-          <input type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-        </label>
-        <button type="submit">Upload and Extract</button>
-        {error ? <p className="error-text">{error}</p> : null}
+        <p className="muted-text">Supported: PNG, JPG, JPEG, WebP and PDF · Maximum {MAX_UPLOAD_SIZE_MB} MB</p>
+        {file ? <p className="muted-text">Selected: {file.name}</p> : null}
+        <button type="submit" disabled={submitting}>
+          {submitting ? 'Processing…' : 'Upload and Extract'}
+        </button>
+        {error ? <p className="error-text" role="alert">{error}</p> : null}
         {result ? (
-          <div className="result-box">
+          <div className="result-box" role="status">
             <p><strong>Status:</strong> {result.status}</p>
             <p><strong>Employee:</strong> {result.employee_name}</p>
             <p><strong>Hospital:</strong> {result.hospital_name || 'N/A'}</p>
