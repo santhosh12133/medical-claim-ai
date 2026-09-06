@@ -3,6 +3,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
+from auth_dependencies import require_admin
+from models_user import User
 from rag.api.dependencies import get_claim_verification_service, get_policy_ingestion_service, get_policy_repository_service, get_rag_settings_cached, get_verification_repository
 from rag.exceptions import ClaimVerificationError, PolicyIngestionError
 from rag.schemas.policy import PolicyDocumentRead, PolicyIngestionResponse, PolicyMetadata
@@ -18,6 +20,7 @@ async def ingest_policy(
     policy_type: str = Form(...),
     policy_version: str = Form("1.0"),
     department: str = Form("Medical"),
+    current_user: User = Depends(require_admin),
     ingestion_service=Depends(get_policy_ingestion_service),
     settings=Depends(get_rag_settings_cached),
 ):
@@ -30,6 +33,10 @@ async def ingest_policy(
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     target_path = settings.rag_upload_dir / f"{timestamp}_{safe_filename}"
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded policy file is empty")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Policy PDF must not exceed 20 MB")
     target_path.write_bytes(content)
 
     metadata = PolicyMetadata(
@@ -55,6 +62,7 @@ async def ingest_policy(
 @router.post("/claims/verify", response_model=ClaimVerificationResponse)
 def verify_claim(
     request: ClaimVerificationRequest,
+    current_user: User = Depends(require_admin),
     verification_service=Depends(get_claim_verification_service),
 ):
     try:
@@ -67,6 +75,7 @@ def verify_claim(
 @router.post("/claims/{claim_id}/verify", response_model=ClaimVerificationResponse)
 def verify_stored_claim(
     claim_id: int,
+    current_user: User = Depends(require_admin),
     verification_service=Depends(get_claim_verification_service),
 ):
     try:
@@ -77,12 +86,19 @@ def verify_stored_claim(
 
 
 @router.get("/policies", response_model=list[PolicyDocumentRead])
-def list_policies(policy_repository=Depends(get_policy_repository_service)):
+def list_policies(
+    current_user: User = Depends(require_admin),
+    policy_repository=Depends(get_policy_repository_service),
+):
     return policy_repository.list_documents()
 
 
 @router.get("/policies/{policy_document_id}", response_model=PolicyDocumentRead)
-def get_policy(policy_document_id: int, policy_repository=Depends(get_policy_repository_service)):
+def get_policy(
+    policy_document_id: int,
+    current_user: User = Depends(require_admin),
+    policy_repository=Depends(get_policy_repository_service),
+):
     policy = policy_repository.get_document_with_chunks(policy_document_id)
     if policy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy document not found")
@@ -90,5 +106,8 @@ def get_policy(policy_document_id: int, policy_repository=Depends(get_policy_rep
 
 
 @router.get("/verifications", response_model=list[VerificationAuditRead])
-def list_verifications(verification_repository=Depends(get_verification_repository)):
+def list_verifications(
+    current_user: User = Depends(require_admin),
+    verification_repository=Depends(get_verification_repository),
+):
     return verification_repository.list_audits()
