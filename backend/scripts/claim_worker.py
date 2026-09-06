@@ -15,10 +15,8 @@ from models import Claim, ClaimEvent
 from ocr.extract import extract_text
 from rag.config.logging import configure_logging
 from rag.config.settings import get_rag_settings
-from rag.repositories.policy_repository import PolicyRepository
 from rag.repositories.verification_repository import VerificationRepository
 from rag.repositories.vector_repository import ChromaPolicyVectorRepository
-from rag.services.chunking_service import ChunkingService
 from rag.services.embedding_service import EmbeddingService
 from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.retrieval_service import PolicyRetrievalService
@@ -34,21 +32,18 @@ class ClaimWorker:
         self.max_attempts = max_attempts
         self.settings = get_rag_settings()
         self.auto_verify = auto_verify and self.settings.auto_decision_enabled
-        self._verification_service = None
+        self._verification_dependencies = None
 
     def _claim_verification_service(self, db: Session) -> ClaimVerificationService:
-        if self._verification_service is None:
+        if self._verification_dependencies is None:
             embedding_service = EmbeddingService(self.settings)
             vector_repository = ChromaPolicyVectorRepository(self.settings, embedding_service)
-            retrieval_service = PolicyRetrievalService(vector_repository, self.settings)
-            verification_repository = VerificationRepository(db)
-            self._verification_service = (
-                retrieval_service,
-                verification_repository,
+            self._verification_dependencies = (
+                PolicyRetrievalService(vector_repository, self.settings),
                 RuleParser(),
                 GPTDecisionService(self.settings),
             )
-        retrieval_service, _, rule_parser, gpt_service = self._verification_service
+        retrieval_service, rule_parser, gpt_service = self._verification_dependencies
         return ClaimVerificationService(
             db=db,
             retrieval_service=retrieval_service,
