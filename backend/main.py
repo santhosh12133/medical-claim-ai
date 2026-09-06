@@ -5,12 +5,12 @@ from typing import List
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from auth import create_access_token, verify_password
 from auth_dependencies import get_current_user, require_admin, require_employee
-from database import UPLOAD_DIR, get_db
+from database import UPLOAD_DIR, engine, get_db
 from models import Claim
 from models_user import User
 from rag.api.routes import router as rag_router
@@ -43,6 +43,23 @@ app.include_router(rag_router)
 @app.get("/")
 def health_check():
     return {"message": "Medical Claim AI backend is running"}
+
+
+@app.get("/health")
+def health():
+    """Lightweight liveness endpoint for load balancers and uptime checks."""
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def readiness_check():
+    """Verify that the API can reach its configured database."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
+    return {"status": "ready", "database": "ok"}
 
 
 @app.post("/auth/login", response_model=LoginResponse)
