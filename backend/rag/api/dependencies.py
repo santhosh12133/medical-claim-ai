@@ -10,6 +10,7 @@ from rag.repositories.verification_repository import VerificationRepository
 from rag.repositories.vector_repository import ChromaPolicyVectorRepository
 from rag.services.chunking_service import ChunkingService
 from rag.services.embedding_service import EmbeddingService
+from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.ingestion_service import PolicyIngestionService
 from rag.services.pdf_parser import PolicyPdfParser
 from rag.services.retrieval_service import PolicyRetrievalService
@@ -51,6 +52,11 @@ def get_rule_parser_cached() -> RuleParser:
     return RuleParser()
 
 
+@lru_cache(maxsize=1)
+def get_gpt_decision_service_cached() -> GPTDecisionService:
+    return GPTDecisionService(get_rag_settings_cached())
+
+
 def get_policy_repository(db: Session = Depends(get_db)) -> PolicyRepository:
     return PolicyRepository(db)
 
@@ -89,12 +95,14 @@ def get_claim_verification_service(
     retrieval_service: PolicyRetrievalService = Depends(get_policy_retrieval_service),
     verification_repository: VerificationRepository = Depends(get_verification_repository),
     rule_parser: RuleParser = Depends(get_rule_parser_cached),
+    gpt_decision_service: GPTDecisionService = Depends(get_gpt_decision_service_cached),
 ) -> ClaimVerificationService:
     return ClaimVerificationService(
         db=db,
         retrieval_service=retrieval_service,
         verification_repository=verification_repository,
         rule_parser=rule_parser,
+        gpt_decision_service=gpt_decision_service,
         settings=get_rag_settings_cached(),
     )
 
