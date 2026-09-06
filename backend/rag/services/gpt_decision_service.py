@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from openai import OpenAI
 
@@ -12,11 +12,11 @@ from rag.domain import ParsedPolicyRule, RetrievalHit
 
 
 class GPTDecisionService:
-    """Use GPT as a policy-grounded second-level adjudicator.
+    """Policy-grounded second-level adjudicator.
 
-    GPT never receives permission to invent policy rules. The deterministic
-    rule engine remains the source of truth for the reimbursement limit; GPT
-    explains, reconciles ambiguity, and can recommend human review.
+    GPT may explain or escalate a deterministic decision, but it can never
+    increase the deterministic reimbursement amount or override a conflicting
+    deterministic result without sending the claim to human review.
     """
 
     def __init__(self, settings: RagSettings) -> None:
@@ -102,25 +102,46 @@ class GPTDecisionService:
         decision = str(result.get("decision", "HUMAN_REVIEW")).upper()
         if decision not in {"APPROVED", "REJECTED", "HUMAN_REVIEW"}:
             decision = "HUMAN_REVIEW"
+
         try:
             confidence = max(0.0, min(1.0, float(result.get("confidence", 0))))
         except (TypeError, ValueError):
             confidence = 0.0
+
         try:
             proposed_amount = Decimal(str(result.get("approved_amount", approved_amount)))
-        except Exception:
+            if not proposed_amount.is_finite():
+                raise InvalidOperation
+        except (InvalidOperation, TypeError, ValueError):
             proposed_amount = approved_amount
-        if proposed_amount < 0:
-            proposed_amount = Decimal("0.00")
+
+        proposed_amount = max(Decimal("0.00"), proposed_amount)
+        safe_amount = min(proposed_amount, max(Decimal("0.00"), approved_amount))
         flags = result.get("risk_flags", [])
         if not isinstance(flags, list):
             flags = ["INVALID_RISK_FLAGS"]
+        flags = [str(flag)[:200] for flag in flags[:10]]
+
+        # GPT cannot silently override the deterministic engine. Any conflict
+        # becomes a human-review recommendation instead of an automatic action.
+        deterministic_normalized = self._normalize_decision(deterministic_decision)
+        if decision != deterministic_normalized and decision != "HUMAN_REVIEW":
+            decision = "HUMAN_REVIEW"
+            confidence = min(confidence, 0.0)
+            flags.append("DECISION_CONFLICT")
+        if decision == "APPROVED" and proposed_amount > approved_amount:
+            decision = "HUMAN_REVIEW"
+            confidence = 0.0
+            flags.append("AMOUNT_EXCEEDS_DETERMINISTIC_RESULT")
+        if decision == "REJECTED":
+            safe_amount = Decimal("0.00")
+
         return {
             "decision": decision,
             "confidence": round(confidence, 4),
-            "approved_amount": str(proposed_amount),
+            "approved_amount": str(safe_amount.quantize(Decimal("0.01"))),
             "reason": str(result.get("reason", "GPT policy assessment completed"))[:2000],
-            "risk_flags": [str(flag)[:200] for flag in flags[:10]],
+            "risk_flags": flags[:10],
         }
 
     @staticmethod
