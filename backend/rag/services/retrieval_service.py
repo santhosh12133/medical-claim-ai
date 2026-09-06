@@ -14,11 +14,7 @@ class PolicyRetrievalService:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def build_query_text(self, request: ClaimVerificationRequest) -> str:
-        parts = [
-            "Medical reimbursement policy verification",
-            f"Treatment: {request.treatment}",
-            f"Amount: {request.amount}",
-        ]
+        parts = ["Medical reimbursement policy verification", f"Treatment: {request.treatment}", f"Amount: {request.amount}"]
         if request.employee_name:
             parts.append(f"Employee: {request.employee_name}")
         if request.hospital_name:
@@ -33,29 +29,21 @@ class PolicyRetrievalService:
 
     def retrieve(self, request: ClaimVerificationRequest, top_k: int | None = None) -> list[RetrievalHit]:
         query_text = self.build_query_text(request)
-        limit = top_k or self.settings.rag_top_k
+        limit = max(1, min(top_k or self.settings.rag_top_k, self.settings.rag_top_k))
         metadata_filter = self._build_filter(request)
-
         try:
-            hits = self.vector_repository.query(query_text=query_text, top_k=limit, where=metadata_filter)
-            if not hits and metadata_filter:
-                self.logger.info("No filtered hits found, retrying without metadata filter")
-                hits = self.vector_repository.query(query_text=query_text, top_k=limit, where=None)
-            return hits
-        except Exception as exc:  # pragma: no cover - defensive vector store guard
+            return self.vector_repository.query(query_text=query_text, top_k=limit, where=metadata_filter)
+        except Exception:
             self.logger.exception("Policy retrieval failed")
             raise
 
-    def _build_filter(self, request: ClaimVerificationRequest) -> dict[str, Any] | None:
+    def _build_filter(self, request: ClaimVerificationRequest) -> dict[str, Any]:
+        filters: list[dict[str, str]] = [{"status": "active"}]
         policy_type = request.policy_type or request.treatment
-        filters: list[dict[str, str]] = []
         if policy_type:
             filters.append({"policy_type": policy_type.strip().title()})
         if request.department:
             filters.append({"department": request.department.strip().title()})
-
-        if not filters:
-            return None
         if len(filters) == 1:
             return filters[0]
         return {"$and": filters}
