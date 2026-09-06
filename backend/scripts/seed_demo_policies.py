@@ -8,7 +8,6 @@ The script is idempotent: the ingestion service rejects duplicate PDFs by SHA-25
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 from database import SessionLocal
 from rag.api.dependencies import (
@@ -144,32 +143,48 @@ POLICY_DEFINITIONS = [
 def build_pdf_text(title: str, policy_type: str, version: str, start: str, end: str, limit: int, clause: str) -> bytes:
     """Build a small deterministic PDF containing one policy page."""
     del limit
-    text = (
-        f"DEMO MEDICAL CLAIM POLICY\\n{title}\\nPolicy Type: {policy_type}\\n"
-        f"Policy Version: {version}\\nEffective From: {start}\\nEffective To: {end}\\n"
-        f"{clause}\\nRequired documents: original invoice or receipt and prescription where applicable.\\n"
-        "Claims without sufficient evidence may be sent for human review.\\n"
+    text = "\n".join(
+        [
+            "DEMO MEDICAL CLAIM POLICY",
+            title,
+            f"Policy Type: {policy_type}",
+            f"Policy Version: {version}",
+            f"Effective From: {start}",
+            f"Effective To: {end}",
+            clause,
+            "Required documents: original invoice or receipt and prescription where applicable.",
+            "Claims without sufficient evidence may be sent for human review.",
+            "",
+        ]
     )
     escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
     stream = f"BT /F1 11 Tf 50 760 Td ({escaped}) Tj ET"
+    newline = "\n"
     objects = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-        f"<< /Length {len(stream.encode())} >>\\nstream\\n{stream}\\nendstream",
+        f"<< /Length {len(stream.encode())} >>{newline}stream{newline}{stream}{newline}endstream",
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
-    pdf = "%PDF-1.4\\n"
+    pdf_parts = ["%PDF-1.4"]
     offsets = [0]
-    for i, obj in enumerate(objects, 1):
-        offsets.append(len(pdf.encode()))
-        pdf += f"{i} 0 obj\\n{obj}\\nendobj\\n"
-    xref = len(pdf.encode())
-    pdf += f"xref\\n0 {len(objects) + 1}\\n0000000000 65535 f \\n"
-    for off in offsets[1:]:
-        pdf += f"{off:010d} 00000 n \\n"
-    pdf += f"trailer\\n<< /Size {len(objects) + 1} /Root 1 0 R >>\\nstartxref\\n{xref}\\n%%EOF\\n"
-    return pdf.encode()
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len((newline.join(pdf_parts) + newline).encode()))
+        pdf_parts.extend([f"{index} 0 obj", obj, "endobj"])
+    xref = len((newline.join(pdf_parts) + newline).encode())
+    pdf_parts.extend([f"xref", f"0 {len(objects) + 1}", "0000000000 65535 f "])
+    pdf_parts.extend(f"{off:010d} 00000 n " for off in offsets[1:])
+    pdf_parts.extend(
+        [
+            "trailer",
+            f"<< /Size {len(objects) + 1} /Root 1 0 R >>",
+            "startxref",
+            str(xref),
+            "%%EOF",
+        ]
+    )
+    return (newline.join(pdf_parts) + newline).encode()
 
 
 def main() -> None:
