@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -31,6 +32,16 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def _decimal_env(name: str) -> Decimal | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        return None
+
+
 @dataclass(slots=True)
 class RagSettings:
     rag_enabled: bool = field(default_factory=lambda: _bool_env("RAG_ENABLED", True))
@@ -51,6 +62,16 @@ class RagSettings:
     gpt_enabled: bool = field(default_factory=lambda: _bool_env("GPT_DECISION_ENABLED", False))
     gpt_model: str = field(default_factory=lambda: os.getenv("GPT_DECISION_MODEL", "gpt-5.6-luna"))
     gpt_timeout_seconds: int = field(default_factory=lambda: _int_env("GPT_DECISION_TIMEOUT_SECONDS", 20))
+    auto_decision_enabled: bool = field(default_factory=lambda: _bool_env("AUTO_DECISION_ENABLED", False))
+    auto_decision_min_confidence: float = field(
+        default_factory=lambda: _float_env("AUTO_DECISION_MIN_CONFIDENCE", 0.85)
+    )
+    auto_decision_require_gpt: bool = field(
+        default_factory=lambda: _bool_env("AUTO_DECISION_REQUIRE_GPT", False)
+    )
+    auto_decision_max_amount: Decimal | None = field(
+        default_factory=lambda: _decimal_env("AUTO_DECISION_MAX_AMOUNT")
+    )
 
     def validate(self) -> None:
         if self.rag_top_k < 1 or self.rag_top_k > 50:
@@ -67,6 +88,10 @@ class RagSettings:
             raise ValueError("RAG_CHUNK_OVERLAP must be >= 0 and smaller than RAG_CHUNK_SIZE")
         if self.gpt_timeout_seconds < 5 or self.gpt_timeout_seconds > 120:
             raise ValueError("GPT_DECISION_TIMEOUT_SECONDS must be between 5 and 120")
+        if not 0.0 <= self.auto_decision_min_confidence <= 1.0:
+            raise ValueError("AUTO_DECISION_MIN_CONFIDENCE must be between 0 and 1")
+        if self.auto_decision_max_amount is not None and self.auto_decision_max_amount <= 0:
+            raise ValueError("AUTO_DECISION_MAX_AMOUNT must be greater than zero")
         if self.gpt_enabled and not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is required when GPT_DECISION_ENABLED=true")
 
