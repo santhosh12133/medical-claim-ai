@@ -14,3 +14,4 @@ pydantic-settings
 pillow
 python-dotenv
 openai
+httpx
