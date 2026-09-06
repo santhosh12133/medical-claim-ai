@@ -48,6 +48,9 @@ class RagSettings:
     rag_max_upload_size_mb: int = field(default_factory=lambda: _int_env("RAG_MAX_UPLOAD_SIZE_MB", 20))
     rag_log_level: str = field(default_factory=lambda: os.getenv("RAG_LOG_LEVEL", "INFO"))
     rag_log_dir: Path = field(default_factory=lambda: Path(os.getenv("RAG_LOG_DIR", "logs")))
+    gpt_enabled: bool = field(default_factory=lambda: _bool_env("GPT_DECISION_ENABLED", False))
+    gpt_model: str = field(default_factory=lambda: os.getenv("GPT_DECISION_MODEL", "gpt-5.6-luna"))
+    gpt_timeout_seconds: int = field(default_factory=lambda: _int_env("GPT_DECISION_TIMEOUT_SECONDS", 20))
 
     def validate(self) -> None:
         if self.rag_top_k < 1 or self.rag_top_k > 50:
@@ -62,6 +65,10 @@ class RagSettings:
             raise ValueError("RAG_CHUNK_SIZE must be at least 100")
         if self.rag_chunk_overlap < 0 or self.rag_chunk_overlap >= self.rag_chunk_size:
             raise ValueError("RAG_CHUNK_OVERLAP must be >= 0 and smaller than RAG_CHUNK_SIZE")
+        if self.gpt_timeout_seconds < 5 or self.gpt_timeout_seconds > 120:
+            raise ValueError("GPT_DECISION_TIMEOUT_SECONDS must be between 5 and 120")
+        if self.gpt_enabled and not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY is required when GPT_DECISION_ENABLED=true")
 
 
 @lru_cache(maxsize=1)
