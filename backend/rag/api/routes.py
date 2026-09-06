@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -11,6 +11,7 @@ from rag.schemas.policy import PolicyDocumentRead, PolicyIngestionResponse, Poli
 from rag.schemas.verification import ClaimVerificationRequest, ClaimVerificationResponse, VerificationAuditRead
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
+PDF_SIGNATURE = b"%PDF-"
 
 
 @router.post("/policies/ingest", response_model=PolicyIngestionResponse, status_code=status.HTTP_201_CREATED)
@@ -30,24 +31,33 @@ async def ingest_policy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF policy files are supported")
 
     safe_filename = Path(file.filename).name
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-    target_path = settings.rag_upload_dir / f"{timestamp}_{safe_filename}"
     content = await file.read()
+    max_size = settings.rag_max_upload_size_mb * 1024 * 1024
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded policy file is empty")
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Policy PDF must not exceed 20 MB")
+    if not content.startswith(PDF_SIGNATURE):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is not a valid PDF")
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Policy PDF must not exceed {settings.rag_max_upload_size_mb} MB",
+        )
+
+    target_path = settings.rag_upload_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{safe_filename}"
     target_path.write_bytes(content)
 
     metadata = PolicyMetadata(
-        title=title,
-        policy_type=policy_type,
-        policy_version=policy_version,
-        department=department,
+        title=title.strip(),
+        policy_type=policy_type.strip(),
+        policy_version=policy_version.strip(),
+        department=department.strip(),
     )
+    if not metadata.title or not metadata.policy_type or not metadata.policy_version or not metadata.department:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Policy metadata cannot be empty")
 
     try:
-        result = ingestion_service.ingest(target_path, file.filename, metadata)
+        result = ingestion_service.ingest(target_path, safe_filename, metadata)
         return PolicyIngestionResponse(
             policy_document_id=result.document_id,
             title=result.title,
@@ -56,6 +66,7 @@ async def ingest_policy(
             collection_name=settings.rag_collection_name,
         )
     except PolicyIngestionError as exc:
+        target_path.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 

@@ -60,6 +60,8 @@ class ChromaPolicyVectorRepository:
 
         for chunk_id, document_text, metadata, distance in zip(ids, documents, metadatas, distances):
             similarity = max(0.0, min(1.0, 1.0 - float(distance)))
+            if similarity < self.settings.rag_min_similarity:
+                continue
             hits.append(
                 RetrievalHit(
                     chunk_id=chunk_id,
