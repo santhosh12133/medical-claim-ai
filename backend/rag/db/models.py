@@ -57,6 +57,13 @@ class ClaimVerificationAudit(Base):
     policy_used = Column(Text, nullable=False)
     reason = Column(Text, nullable=False)
     decision_trace_json = Column(JSON, nullable=False, default=list)
+    deterministic_decision = Column(String(40), nullable=True)
+    deterministic_confidence = Column(Numeric(5, 4), nullable=True)
+    gpt_decision = Column(String(40), nullable=True)
+    gpt_confidence = Column(Numeric(5, 4), nullable=True)
+    final_decision_source = Column(String(30), nullable=False, default="deterministic")
+    auto_decision = Column(String(30), nullable=False, default="human")
+    risk_flags_json = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     claim = relationship("Claim")
