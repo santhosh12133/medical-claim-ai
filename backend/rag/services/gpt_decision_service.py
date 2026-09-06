@@ -39,6 +39,37 @@ class GPTDecisionService:
         if not self.settings.gpt_enabled or self.client is None:
             return self._disabled_result()
 
+        payload = self._build_payload(
+            treatment,
+            claim_amount,
+            deterministic_decision,
+            deterministic_approved_amount,
+            deterministic_reason,
+            parsed_rule,
+            retrieval_hits,
+        )
+        try:
+            response = self.client.responses.create(
+                model=self.settings.gpt_model,
+                instructions=self._instructions(),
+                input=json.dumps(payload, ensure_ascii=False),
+            )
+            result = json.loads(response.output_text)
+            return self._validate_result(result, deterministic_decision, deterministic_approved_amount)
+        except Exception:
+            self.logger.exception("GPT decision failed; falling back to deterministic decision")
+            return self._fallback_result(deterministic_decision, deterministic_approved_amount)
+
+    def _build_payload(
+        self,
+        treatment: str,
+        claim_amount: Decimal,
+        deterministic_decision: str,
+        deterministic_approved_amount: Decimal,
+        deterministic_reason: str,
+        parsed_rule: ParsedPolicyRule | None,
+        retrieval_hits: list[RetrievalHit],
+    ) -> dict:
         evidence = [
             {
                 "title": hit.metadata.get("title", "Policy"),
@@ -49,8 +80,7 @@ class GPTDecisionService:
             }
             for hit in retrieval_hits[: self.settings.rag_top_k]
         ]
-
-        payload = {
+        return {
             "claim": {"treatment": treatment, "amount": str(claim_amount)},
             "deterministic_result": {
                 "decision": deterministic_decision,
@@ -62,7 +92,9 @@ class GPTDecisionService:
             "policy_evidence": evidence,
         }
 
-        instructions = (
+    @staticmethod
+    def _instructions() -> str:
+        return (
             "You are a medical reimbursement policy adjudication assistant. "
             "Use ONLY the supplied policy evidence. Do not invent coverage, limits, exclusions, or dates. "
             "Treat the deterministic result as the baseline. If evidence is ambiguous, conflicting, stale, "
@@ -72,62 +104,48 @@ class GPTDecisionService:
             "approved_amount must be a numeric string. risk_flags must be an array of short strings."
         )
 
-        try:
-            response = self.client.responses.create(
-                model=self.settings.gpt_model,
-                instructions=instructions,
-                input=json.dumps(payload, ensure_ascii=False),
-            )
-            result = json.loads(response.output_text)
-            return self._validate_result(result, deterministic_decision, deterministic_approved_amount)
-        except Exception:
-            self.logger.exception("GPT decision failed; falling back to deterministic decision")
-            return {
-                "decision": self._normalize_decision(deterministic_decision),
-                "confidence": 0.0,
-                "approved_amount": str(deterministic_approved_amount),
-                "reason": "GPT adjudication unavailable; deterministic policy engine result retained",
-                "risk_flags": ["GPT_UNAVAILABLE"],
-            }
-
     @staticmethod
     def _normalize_decision(decision: str) -> str:
-        if decision == "Approved":
-            return "APPROVED"
-        if decision == "Rejected":
-            return "REJECTED"
-        return "HUMAN_REVIEW"
+        mapping = {"Approved": "APPROVED", "Rejected": "REJECTED"}
+        return mapping.get(decision, "HUMAN_REVIEW")
+
+    @staticmethod
+    def _parse_confidence(value: object) -> float:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _parse_amount(value: object, fallback: Decimal) -> Decimal:
+        try:
+            amount = Decimal(str(value))
+            if not amount.is_finite():
+                raise InvalidOperation
+            return max(Decimal("0.00"), amount)
+        except (InvalidOperation, TypeError, ValueError):
+            return max(Decimal("0.00"), fallback)
+
+    @staticmethod
+    def _parse_flags(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return ["INVALID_RISK_FLAGS"]
+        return [str(flag)[:200] for flag in value[:10]]
 
     def _validate_result(self, result: dict, deterministic_decision: str, approved_amount: Decimal) -> dict:
         decision = str(result.get("decision", "HUMAN_REVIEW")).upper()
         if decision not in {"APPROVED", "REJECTED", "HUMAN_REVIEW"}:
             decision = "HUMAN_REVIEW"
 
-        try:
-            confidence = max(0.0, min(1.0, float(result.get("confidence", 0))))
-        except (TypeError, ValueError):
-            confidence = 0.0
-
-        try:
-            proposed_amount = Decimal(str(result.get("approved_amount", approved_amount)))
-            if not proposed_amount.is_finite():
-                raise InvalidOperation
-        except (InvalidOperation, TypeError, ValueError):
-            proposed_amount = approved_amount
-
-        proposed_amount = max(Decimal("0.00"), proposed_amount)
+        confidence = self._parse_confidence(result.get("confidence", 0))
+        proposed_amount = self._parse_amount(result.get("approved_amount", approved_amount), approved_amount)
         safe_amount = min(proposed_amount, max(Decimal("0.00"), approved_amount))
-        flags = result.get("risk_flags", [])
-        if not isinstance(flags, list):
-            flags = ["INVALID_RISK_FLAGS"]
-        flags = [str(flag)[:200] for flag in flags[:10]]
-
-        # GPT cannot silently override the deterministic engine. Any conflict
-        # becomes a human-review recommendation instead of an automatic action.
+        flags = self._parse_flags(result.get("risk_flags", []))
         deterministic_normalized = self._normalize_decision(deterministic_decision)
-        if decision != deterministic_normalized and decision != "HUMAN_REVIEW":
+
+        if decision not in {deterministic_normalized, "HUMAN_REVIEW"}:
             decision = "HUMAN_REVIEW"
-            confidence = min(confidence, 0.0)
+            confidence = 0.0
             flags.append("DECISION_CONFLICT")
         if decision == "APPROVED" and proposed_amount > approved_amount:
             decision = "HUMAN_REVIEW"
@@ -142,6 +160,16 @@ class GPTDecisionService:
             "approved_amount": str(safe_amount.quantize(Decimal("0.01"))),
             "reason": str(result.get("reason", "GPT policy assessment completed"))[:2000],
             "risk_flags": flags[:10],
+        }
+
+    @staticmethod
+    def _fallback_result(deterministic_decision: str, approved_amount: Decimal) -> dict:
+        return {
+            "decision": GPTDecisionService._normalize_decision(deterministic_decision),
+            "confidence": 0.0,
+            "approved_amount": str(approved_amount),
+            "reason": "GPT adjudication unavailable; deterministic policy engine result retained",
+            "risk_flags": ["GPT_UNAVAILABLE"],
         }
 
     @staticmethod
