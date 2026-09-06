@@ -4,14 +4,15 @@ A production-oriented full-stack medical claim processing system combining async
 
 ## Stack
 
-- Frontend: React + Vite
-- Backend: FastAPI
+- Frontend: React + Vite + Nginx
+- Backend: FastAPI + Uvicorn
 - Database: PostgreSQL via SQLAlchemy + Alembic
 - OCR: pytesseract + RapidOCR + Pillow
 - RAG: ChromaDB + Sentence Transformers
 - Policy parsing: deterministic rule extraction with confidence scoring
 - AI adjudication: GPT-assisted assessment with deterministic safety constraints
 - Async processing: database-backed queue with concurrent worker processes
+- Deployment: Docker + Docker Compose
 
 ## Features
 
@@ -57,10 +58,79 @@ medical-claim-ai/
     scripts/
     tests/
   docs/
+  docker-compose.yml
   README.md
 ```
 
-## Quick Start
+## Docker Deployment
+
+The repository includes a four-service production-style Compose stack:
+
+```text
+Browser -> Nginx/React -> FastAPI -> PostgreSQL
+                         |
+                         +-> background claim worker
+                         +-> ChromaDB persistent volume
+                         +-> upload/policy persistent volumes
+```
+
+### 1. Configure secrets
+
+Copy `.env.docker.example` to `.env` and replace the placeholder database password and application secret with strong random values. Keep `.env` out of Git.
+
+### 2. Build and start
+
+From the repository root:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+The API container applies Alembic migrations before starting Uvicorn. The worker starts only after the API readiness check succeeds. PostgreSQL data, uploaded claims, policy documents, Chroma data, and logs are stored in named Docker volumes so container restarts do not erase application state.
+
+### 3. Verify the deployment
+
+```bash
+docker compose ps
+docker compose logs --tail=100 api
+docker compose logs --tail=100 worker
+```
+
+Health endpoints:
+
+```text
+http://localhost:8000/health
+http://localhost:8000/health/ready
+```
+
+Open the web application at:
+
+```text
+http://localhost:8080
+```
+
+### 4. Stop or restart
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Do **not** use `docker compose down -v` unless you intentionally want to delete the PostgreSQL database and persistent application data.
+
+### Production deployment notes
+
+- Put TLS/HTTPS in front of the frontend and API.
+- Set `CORS_ORIGINS` to the exact public frontend origin; do not use `*` with credentials.
+- Store `SECRET_KEY`, database credentials, and `OPENAI_API_KEY` in the deployment platform's secret manager rather than in Git.
+- Use a managed PostgreSQL instance for serious production workloads and configure backups/PITR.
+- Keep the API and worker as separate scalable processes. Increase worker replicas for OCR throughput rather than blocking API requests.
+- The current queue is PostgreSQL-backed. At higher scale, it can be replaced with a managed Redis/queue without changing the claim-processing API contract.
+- Use object storage for claim/policy files when multiple hosts or worker replicas require shared storage.
+- Keep autonomous decisions disabled until representative OCR, policy, and end-to-end validation results have been measured.
+
+## Quick Start Without Docker
 
 ### Backend
 
@@ -97,14 +167,11 @@ For a single controlled batch:
 python scripts/claim_worker.py --once --batch-size 8
 ```
 
-Run multiple worker processes in production so OCR and policy verification do not block API requests.
-
 ### Frontend
 
-1. Install dependencies in `frontend/`.
-2. Run the Vite dev server:
-
 ```bash
+cd frontend
+npm ci
 npm run dev
 ```
 
@@ -161,7 +228,7 @@ The agentic engine is deliberately conservative: missing evidence, low confidenc
 
 ## Async Processing
 
-Claim uploads now return after the document is safely stored and a database-backed queue record is created. `scripts/claim_worker.py` claims queued jobs using row-level locking, performs OCR and validation, retries transient failures up to a bounded attempt count, and can invoke policy verification automatically when autonomous decisions are enabled.
+Claim uploads return after the document is safely stored and a database-backed queue record is created. `scripts/claim_worker.py` claims queued jobs using row-level locking, performs OCR and validation, retries transient failures up to a bounded attempt count, and can invoke policy verification automatically when autonomous decisions are enabled.
 
 This separates API latency from OCR/AI latency and allows horizontal worker scaling without requiring a message broker for the initial deployment. PostgreSQL row locking prevents two workers from processing the same queued claim concurrently.
 
@@ -192,7 +259,7 @@ This evaluates field extraction on generated labeled documents. For a production
 python scripts/benchmark_e2e.py --base-url http://localhost:8000 --token YOUR_EMPLOYEE_TOKEN --requests 250 --concurrency 10
 ```
 
-This measures the HTTP intake path after asynchronous processing is enabled. It reports throughput, latency, success rate, and an extrapolated daily intake rate. Worker completion throughput must be measured separately for a true end-to-end processing-capacity claim.
+Run load tests only against a dedicated staging deployment. This measures the HTTP intake path after asynchronous processing is enabled. Worker completion throughput must be measured separately for a true end-to-end processing-capacity claim.
 
 ### Manual-review measurement
 
@@ -245,6 +312,7 @@ Each policy can carry a version, effective date window, SHA-256 content fingerpr
 - [x] End-to-end intake load-test harness
 - [x] Asynchronous claim worker
 - [x] Admin dashboard decision metrics
+- [x] Docker Compose deployment stack
 - [ ] Run and publish measured OCR accuracy on a representative labeled dataset
 - [ ] Run and publish sustained end-to-end worker throughput/load results
 - [ ] Add production object storage and dedicated managed queue if deployment scale requires it
