@@ -64,4 +64,21 @@ class VerificationAuditRead(BaseModel):
     policy_used: str
     reason: str
     decision_trace_json: list[str]
+    deterministic_decision: str | None
+    deterministic_confidence: Decimal | None
+    gpt_decision: str | None
+    gpt_confidence: Decimal | None
+    final_decision_source: str
+    auto_decision: str
+    risk_flags_json: list[str]
     created_at: datetime
+
+
+class DecisionMetricsRead(BaseModel):
+    total_verifications: int
+    auto_approved: int
+    auto_rejected: int
+    human_review: int
+    autonomous_decision_rate_percent: float
+    manual_review_reduction_percent: float
+    average_confidence: float
