@@ -19,14 +19,11 @@ def run(iterations: int) -> dict[str, float | int]:
     engine = ClaimDecisionEngine(enabled=True, min_confidence=0.85)
     samples = []
     autonomous = 0
-    baseline_manual = 0
 
     for index in range(iterations):
         amount = Decimal("5000") if index % 5 else Decimal("25000")
         deterministic = "Approved" if amount <= 10000 else "Rejected"
         confidence = 0.95 if index % 10 else 0.70
-        if confidence < 0.85:
-            baseline_manual += 1
         start = time.perf_counter()
         result = engine.resolve(
             deterministic_decision=deterministic,
@@ -47,7 +44,8 @@ def run(iterations: int) -> dict[str, float | int]:
 
     elapsed_seconds = sum(samples) / 1000
     throughput = iterations / elapsed_seconds if elapsed_seconds else 0
-    reduction = ((baseline_manual - (iterations - autonomous)) / baseline_manual * 100) if baseline_manual else 0
+    manual_reviews = iterations - autonomous
+    reduction = (autonomous / iterations * 100) if iterations else 0
     return {
         "iterations": iterations,
         "throughput_claims_per_second": round(throughput, 2),
@@ -55,8 +53,8 @@ def run(iterations: int) -> dict[str, float | int]:
         "p50_latency_ms": round(statistics.median(samples), 3),
         "p95_latency_ms": round(sorted(samples)[int(len(samples) * 0.95) - 1], 3),
         "autonomous_decisions": autonomous,
-        "human_review_decisions": iterations - autonomous,
-        "baseline_manual_review": baseline_manual,
+        "human_review_decisions": manual_reviews,
+        "manual_baseline_reviews": iterations,
         "manual_review_reduction_percent": round(reduction, 2),
     }
 
