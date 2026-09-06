@@ -23,6 +23,11 @@ class Claim(Base):
     ocr_text = Column(Text, nullable=True)
     validation_message = Column(Text, nullable=True)
     file_path = Column(Text, nullable=True)
+    processing_status = Column(String(30), nullable=False, default="queued", index=True)
+    processing_attempts = Column(Integer, nullable=False, default=0)
+    processing_error = Column(Text, nullable=True)
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    processing_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
