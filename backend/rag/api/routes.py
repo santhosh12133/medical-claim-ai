@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import hashlib
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func
 
 from auth_dependencies import require_admin
