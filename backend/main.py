@@ -1,9 +1,9 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -13,9 +13,9 @@ from auth_dependencies import get_current_user, require_admin, require_employee
 from database import UPLOAD_DIR, engine, get_db
 from models import Claim
 from models_user import User
+from ocr.extract import extract_text
 from rag.api.routes import router as rag_router
 from rag.config.logging import configure_logging
-from ocr.extract import extract_text
 from schemas import ClaimActionResponse, ClaimRead, LoginRequest, LoginResponse, UserRead
 from services.claim_validation import extract_claim_fields, validate_claim_fields
 
@@ -96,6 +96,20 @@ def get_claim(claim_id: int, current_user: User = Depends(get_current_user), db:
     return claim
 
 
+def _validate_upload_content(filename: str, content: bytes) -> None:
+    """Validate the file signature as well as the extension to reduce spoofed uploads."""
+    suffix = Path(filename).suffix.lower()
+    signatures = {
+        ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".jpg": content.startswith(b"\xff\xd8\xff"),
+        ".jpeg": content.startswith(b"\xff\xd8\xff"),
+        ".webp": len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP",
+        ".pdf": content.startswith(b"%PDF-") or content.startswith(b"%PDF"),
+    }
+    if not signatures.get(suffix, False):
+        raise HTTPException(status_code=400, detail="File content does not match its extension")
+
+
 @app.post("/claims/upload", response_model=ClaimRead)
 async def upload_claim(
     file: UploadFile = File(...),
@@ -104,47 +118,61 @@ async def upload_claim(
     current_user: User = Depends(require_employee),
     db: Session = Depends(get_db),
 ):
+    del employee_name  # Identity is taken from the authenticated account, never from the form.
+
     suffix = Path(file.filename or "claim-image").suffix.lower()
     allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
     if suffix not in allowed_suffixes:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    content = await file.read()
     max_size_mb = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
+    if max_size_mb <= 0:
+        raise HTTPException(status_code=500, detail="Invalid upload size configuration")
     max_size = max_size_mb * 1024 * 1024
+
+    content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
     if len(content) > max_size:
         raise HTTPException(status_code=413, detail=f"File size must not exceed {max_size_mb} MB")
+    _validate_upload_content(file.filename or "claim-image", content)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     stored_name = f"{timestamp}{suffix}"
     file_path = UPLOAD_DIR / stored_name
     file_path.write_bytes(content)
 
-    ocr_text = extract_text(file_path)
-    extracted_fields = extract_claim_fields(ocr_text)
-    extracted_fields["employee_name"] = current_user.full_name
-    if treatment and treatment.strip():
-        extracted_fields["treatment"] = treatment.strip()
-    is_valid, validation_message = validate_claim_fields(extracted_fields)
+    try:
+        ocr_text = extract_text(file_path)
+        extracted_fields = extract_claim_fields(ocr_text)
+        extracted_fields["employee_name"] = current_user.full_name
+        if treatment and treatment.strip():
+            extracted_fields["treatment"] = treatment.strip()[:120]
+        is_valid, validation_message = validate_claim_fields(extracted_fields)
 
-    claim = Claim(
-        user_id=current_user.id,
-        employee_name=current_user.full_name,
-        hospital_name=extracted_fields.get("hospital_name"),
-        treatment=extracted_fields.get("treatment"),
-        amount=extracted_fields.get("amount"),
-        claim_date=extracted_fields.get("claim_date"),
-        status="Pending Review" if is_valid else "Needs Attention",
-        ocr_text=ocr_text,
-        validation_message=validation_message,
-        file_path=str(file_path),
-    )
-    db.add(claim)
-    db.commit()
-    db.refresh(claim)
-    return claim
+        claim = Claim(
+            user_id=current_user.id,
+            employee_name=current_user.full_name,
+            hospital_name=extracted_fields.get("hospital_name"),
+            treatment=extracted_fields.get("treatment"),
+            amount=extracted_fields.get("amount"),
+            claim_date=extracted_fields.get("claim_date"),
+            status="Pending Review" if is_valid else "Needs Attention",
+            ocr_text=ocr_text,
+            validation_message=validation_message,
+            file_path=str(file_path),
+        )
+        db.add(claim)
+        db.commit()
+        db.refresh(claim)
+        return claim
+    except HTTPException:
+        file_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        db.rollback()
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="The uploaded document could not be processed") from exc
 
 
 @app.patch("/claims/{claim_id}/approve", response_model=ClaimActionResponse)
