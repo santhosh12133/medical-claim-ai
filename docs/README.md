@@ -15,6 +15,7 @@ This documentation is intentionally structured like an engineering system of rec
 ### 02 — Architecture
 
 - [System Architecture](system-architecture.md) — service boundaries, data ownership, request flows, scaling and failure isolation
+- [Architecture Diagrams](diagrams.md) — system context, sequences, state machines, ER model, deployment and trust boundaries
 - [Architecture Decision Records](architecture-decision-records.md) — important design decisions, alternatives and trade-offs
 
 ### 03 — Data and API
@@ -55,6 +56,8 @@ This documentation is intentionally structured like an engineering system of rec
 - [Traceability & Evidence](traceability.md) — requirements → implementation → tests → deployment evidence
 - [Developer Guide](developer-guide.md) — repository orientation, change workflow, API/database/AI development rules
 - [Glossary](glossary.md) — shared technical and domain vocabulary
+- [Root Contribution Guide](../CONTRIBUTING.md) — contribution, review and definition-of-done standards
+- [Changelog](../CHANGELOG.md) — release-facing history and release format
 
 ---
 
