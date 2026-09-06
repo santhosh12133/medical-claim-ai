@@ -7,9 +7,11 @@ backend/venv/
 backend/__pycache__/
 backend/**/*.pyc
 backend/logs/
+backend/uploads/
+backend/policy_uploads/
+backend/chroma/
 *.db
 *.db-journal
-backend/uploads/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
