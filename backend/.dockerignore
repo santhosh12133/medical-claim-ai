@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.db
+.env
+.venv/
+venv/
+uploads/
+policy_uploads/
+chroma/
+chroma_db/
+logs/
+.pytest_cache/
+.coverage
+.git/
+.gitignore
+README.md
