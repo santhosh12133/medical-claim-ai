@@ -10,7 +10,12 @@ ALGORITHM = "HS256"
 
 
 def _secret_key() -> str:
-    return os.getenv("SECRET_KEY", "change-me")
+    secret = os.getenv("SECRET_KEY", "").strip()
+    if not secret or secret == "change-me":
+        raise RuntimeError("SECRET_KEY must be configured with a strong random value")
+    if len(secret) < 32:
+        raise RuntimeError("SECRET_KEY must be at least 32 characters long")
+    return secret
 
 
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
