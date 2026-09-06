@@ -28,6 +28,14 @@ class PolicyRetrievalHit(BaseModel):
     title: str
 
 
+class GPTDecisionAssessment(BaseModel):
+    decision: str
+    confidence: float = Field(ge=0, le=1)
+    approved_amount: Decimal
+    reason: str
+    risk_flags: list[str] = Field(default_factory=list)
+
+
 class ClaimVerificationResponse(BaseModel):
     claim_id: int | None = None
     status: str
@@ -38,6 +46,7 @@ class ClaimVerificationResponse(BaseModel):
     reason: str
     retrieved_policies: list[PolicyRetrievalHit]
     decision_trace: list[str]
+    gpt_assessment: GPTDecisionAssessment | None = None
 
 
 class VerificationAuditRead(BaseModel):
