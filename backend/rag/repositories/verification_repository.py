@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 from sqlalchemy.orm import Session
 
 from rag.db.models import ClaimVerificationAudit
