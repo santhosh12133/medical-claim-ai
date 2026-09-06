@@ -52,11 +52,16 @@ POLICY_DEFINITIONS = [
 
 
 def build_pdf_text(title: str, policy_type: str, version: str, start: str, end: str, limit: int, clause: str) -> bytes:
-    # Minimal valid PDF generated without external tooling. Text extraction is intentionally simple and deterministic.
-    escaped = (f"DEMO MEDICAL CLAIM POLICY\\n{title}\\nPolicy Type: {policy_type}\\nPolicy Version: {version}\\nEffective From: {start}\\nEffective To: {end}\\n{clause}\\n"
-               "Required documents: original invoice or receipt and prescription where applicable.\\n"
-               "Claims without sufficient evidence may be sent for human review.\\n")
-    stream = f"BT /F1 11 Tf 50 760 Td ({escaped.replace('(', '\\(').replace(')', '\\)')}) Tj ET"
+    """Build a small deterministic PDF containing one policy page."""
+    del limit  # The limit is already represented in the policy clause.
+    text = (
+        f"DEMO MEDICAL CLAIM POLICY\\n{title}\\nPolicy Type: {policy_type}\\n"
+        f"Policy Version: {version}\\nEffective From: {start}\\nEffective To: {end}\\n"
+        f"{clause}\\nRequired documents: original invoice or receipt and prescription where applicable.\\n"
+        "Claims without sufficient evidence may be sent for human review.\\n"
+    )
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 11 Tf 50 760 Td ({escaped}) Tj ET"
     objects = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -103,7 +108,14 @@ def main() -> None:
                 skipped += 1
                 continue
             path.write_bytes(content)
-            metadata = PolicyMetadata(title=title, policy_type=policy_type, policy_version=version, department="Medical", effective_from=start, effective_to=end)
+            metadata = PolicyMetadata(
+                title=title,
+                policy_type=policy_type,
+                policy_version=version,
+                department="Medical",
+                effective_from=start,
+                effective_to=end,
+            )
             service.ingest(path, filename, metadata)
             ingested += 1
         print(f"Demo policy seed complete: ingested={ingested}, skipped={skipped}, total={len(POLICY_DEFINITIONS)}")
