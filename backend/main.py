@@ -14,11 +14,9 @@ from auth_dependencies import get_current_user, require_admin, require_employee
 from database import UPLOAD_DIR, engine, get_db
 from models import Claim, ClaimEvent
 from models_user import User
-from ocr.extract import extract_text
 from rag.api.routes import router as rag_router
 from rag.config.logging import configure_logging
 from schemas import ClaimActionResponse, ClaimEventRead, ClaimRead, LoginRequest, LoginResponse, UserRead
-from services.claim_validation import extract_claim_fields, validate_claim_fields
 
 configure_logging()
 
@@ -182,24 +180,15 @@ async def upload_claim(
     file_path.write_bytes(content)
 
     try:
-        ocr_text = extract_text(file_path)
-        extracted_fields = extract_claim_fields(ocr_text)
-        extracted_fields["employee_name"] = current_user.full_name
-        if treatment and treatment.strip():
-            extracted_fields["treatment"] = treatment.strip()[:120]
-        is_valid, validation_message = validate_claim_fields(extracted_fields)
-
         claim = Claim(
             user_id=current_user.id,
             employee_name=current_user.full_name,
-            hospital_name=extracted_fields.get("hospital_name"),
-            treatment=extracted_fields.get("treatment"),
-            amount=extracted_fields.get("amount"),
-            claim_date=extracted_fields.get("claim_date"),
-            status="Pending Review" if is_valid else "Needs Attention",
-            ocr_text=ocr_text,
-            validation_message=validation_message,
+            treatment=treatment.strip()[:120] if treatment and treatment.strip() else None,
+            status="Processing",
+            validation_message="Claim queued for background OCR and validation",
             file_path=str(file_path),
+            processing_status="queued",
+            processing_attempts=0,
         )
         db.add(claim)
         db.flush()
@@ -208,9 +197,9 @@ async def upload_claim(
             claim_id=claim.id,
             actor_user_id=current_user.id,
             event_type="CLAIM_SUBMITTED",
-            message="Claim submitted and document processed",
+            message="Claim submitted and queued for asynchronous processing",
             status_after=claim.status,
-            metadata={"validation_passed": is_valid},
+            metadata={"processing_status": "queued"},
         )
         db.commit()
         db.refresh(claim)
@@ -222,7 +211,7 @@ async def upload_claim(
     except Exception as exc:
         db.rollback()
         file_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail="The uploaded document could not be processed") from exc
+        raise HTTPException(status_code=422, detail="The uploaded document could not be queued") from exc
 
 
 @app.patch("/claims/{claim_id}/approve", response_model=ClaimActionResponse)
