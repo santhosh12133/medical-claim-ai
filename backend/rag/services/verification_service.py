@@ -18,6 +18,7 @@ from rag.schemas.verification import (
     GPTDecisionAssessment,
     PolicyRetrievalHit,
 )
+from rag.services.decision_engine import ClaimDecisionEngine
 from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.retrieval_service import PolicyRetrievalService
 from rag.services.rule_parser import RuleParser
@@ -39,6 +40,12 @@ class ClaimVerificationService:
         self.rule_parser = rule_parser
         self.settings = settings or get_rag_settings()
         self.gpt_decision_service = gpt_decision_service or GPTDecisionService(self.settings)
+        self.decision_engine = ClaimDecisionEngine(
+            enabled=self.settings.auto_decision_enabled,
+            min_confidence=self.settings.auto_decision_min_confidence,
+            require_gpt=self.settings.auto_decision_require_gpt,
+            max_amount=self.settings.auto_decision_max_amount,
+        )
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def verify(
@@ -204,29 +211,32 @@ class ClaimVerificationService:
             parsed_rule=parsed_rule,
             retrieval_hits=retrieval_hits,
         )
-        gpt_assessment = None
-        if gpt_raw["decision"] != "NOT_RUN":
-            gpt_assessment = GPTDecisionAssessment(
-                decision=gpt_raw["decision"],
-                confidence=gpt_raw["confidence"],
-                approved_amount=Decimal(gpt_raw["approved_amount"]),
-                reason=gpt_raw["reason"],
-                risk_flags=gpt_raw["risk_flags"],
-            )
-            decision_trace.append(
-                f"GPT adjudication: {gpt_assessment.decision} ({gpt_assessment.confidence:.2f})"
-            )
-            if gpt_assessment.risk_flags:
-                decision_trace.append(f"GPT risk flags: {', '.join(gpt_assessment.risk_flags)}")
+        gpt_assessment = self._build_gpt_assessment(gpt_raw, decision_trace)
+        decision_result = self.decision_engine.resolve(
+            deterministic_decision=decision,
+            deterministic_amount=approved_amount,
+            deterministic_confidence=confidence,
+            deterministic_reason=reason,
+            gpt_assessment=gpt_raw if gpt_assessment else None,
+        )
+        final_decision = self._display_decision(decision_result.decision)
+        final_amount = decision_result.approved_amount
+        final_confidence = decision_result.confidence
+        final_reason = self._final_reason(decision_result.reason, reason)
+        decision_trace.append(
+            f"Decision engine: {final_decision} ({final_confidence:.2f})"
+        )
+        if decision_result.flags:
+            decision_trace.append(f"Decision flags: {', '.join(decision_result.flags)}")
 
         response = ClaimVerificationResponse(
             claim_id=claim_id,
-            status=decision,
-            approved_amount=approved_amount,
-            confidence=confidence,
+            status=final_decision,
+            approved_amount=final_amount,
+            confidence=final_confidence,
             policy_used=policy_used,
             policy_source=policy_source,
-            reason=reason,
+            reason=final_reason,
             retrieved_policies=[
                 PolicyRetrievalHit(
                     chunk_id=hit.chunk_id,
@@ -251,30 +261,69 @@ class ClaimVerificationService:
             policy_document_id=selected_document_id,
             claim_payload_json=request.model_dump(mode="json"),
             retrieved_chunks_json=[hit.model_dump(mode="json") for hit in response.retrieved_policies],
-            decision=decision,
-            approved_amount=approved_amount,
-            confidence=confidence,
+            decision=final_decision,
+            approved_amount=final_amount,
+            confidence=final_confidence,
             policy_source=policy_source,
             policy_used=policy_used,
-            reason=reason,
+            reason=final_reason,
             decision_trace_json=decision_trace,
+            deterministic_decision=decision,
+            deterministic_confidence=Decimal(str(confidence)),
+            gpt_decision=(gpt_assessment.decision if gpt_assessment else None),
+            gpt_confidence=(Decimal(str(gpt_assessment.confidence)) if gpt_assessment else None),
+            final_decision_source="decision_engine" if self.settings.auto_decision_enabled else "deterministic",
+            auto_decision=("approved" if final_decision == "Approved" else "rejected" if final_decision == "Rejected" else "human"),
+            risk_flags_json=decision_result.flags,
         )
         self.verification_repository.save_audit(audit)
 
         if update_claim_summary and claim_id is not None:
             claim = self.db.get(Claim, claim_id)
             if claim is not None:
-                claim.policy_decision = decision
-                claim.policy_approved_amount = approved_amount
-                claim.policy_confidence = Decimal(str(confidence))
+                claim.policy_decision = final_decision
+                claim.policy_approved_amount = final_amount
+                claim.policy_confidence = Decimal(str(final_confidence))
                 claim.policy_source = policy_source
-                claim.policy_reason = reason
+                claim.policy_reason = final_reason
                 claim.policy_checked_at = datetime.now(timezone.utc)
-                if decision == "Rejected":
+                if final_decision == "Rejected":
                     claim.status = "Needs Attention"
-                elif decision == "Approved" and claim.status in {"Pending", "Needs Attention"}:
+                elif final_decision == "Approved" and claim.status in {"Pending", "Needs Attention"}:
                     claim.status = "Pending Review"
 
         self.db.commit()
         self.db.refresh(audit)
         return response
+
+    @staticmethod
+    def _build_gpt_assessment(gpt_raw: dict, decision_trace: list[str]) -> GPTDecisionAssessment | None:
+        if gpt_raw["decision"] == "NOT_RUN":
+            return None
+        assessment = GPTDecisionAssessment(
+            decision=gpt_raw["decision"],
+            confidence=gpt_raw["confidence"],
+            approved_amount=Decimal(gpt_raw["approved_amount"]),
+            reason=gpt_raw["reason"],
+            risk_flags=gpt_raw["risk_flags"],
+        )
+        decision_trace.append(
+            f"GPT adjudication: {assessment.decision} ({assessment.confidence:.2f})"
+        )
+        if assessment.risk_flags:
+            decision_trace.append(f"GPT risk flags: {', '.join(assessment.risk_flags)}")
+        return assessment
+
+    @staticmethod
+    def _display_decision(decision: str) -> str:
+        return {
+            "APPROVED": "Approved",
+            "REJECTED": "Rejected",
+            "HUMAN_REVIEW": "Needs Human Review",
+        }.get(decision, "Needs Human Review")
+
+    @staticmethod
+    def _final_reason(engine_reason: str, deterministic_reason: str) -> str:
+        if engine_reason == deterministic_reason:
+            return engine_reason
+        return engine_reason
