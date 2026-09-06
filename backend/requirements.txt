@@ -13,3 +13,4 @@ pypdf
 pydantic-settings
 pillow
 python-dotenv
+openai
