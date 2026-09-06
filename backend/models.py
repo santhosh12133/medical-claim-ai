@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 
 from database import Base
 
@@ -7,6 +7,7 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     employee_name = Column(String(100), nullable=False)
     hospital_name = Column(String(100), nullable=True)
     treatment = Column(String(120), nullable=True, index=True)
