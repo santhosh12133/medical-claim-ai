@@ -12,7 +12,8 @@ from rag.db.models import ClaimVerificationAudit
 from rag.domain import ParsedPolicyRule, RetrievalHit
 from rag.exceptions import ClaimVerificationError
 from rag.repositories.verification_repository import VerificationRepository
-from rag.schemas.verification import ClaimVerificationRequest, ClaimVerificationResponse, PolicyRetrievalHit
+from rag.schemas.verification import ClaimVerificationRequest, ClaimVerificationResponse, GPTDecisionAssessment, PolicyRetrievalHit
+from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.retrieval_service import PolicyRetrievalService
 from rag.services.rule_parser import RuleParser
 
@@ -24,6 +25,7 @@ class ClaimVerificationService:
         retrieval_service: PolicyRetrievalService,
         verification_repository: VerificationRepository,
         rule_parser: RuleParser,
+        gpt_decision_service: GPTDecisionService | None = None,
         settings: RagSettings | None = None,
     ) -> None:
         self.db = db
@@ -31,6 +33,7 @@ class ClaimVerificationService:
         self.verification_repository = verification_repository
         self.rule_parser = rule_parser
         self.settings = settings or get_rag_settings()
+        self.gpt_decision_service = gpt_decision_service or GPTDecisionService(self.settings)
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def verify(
@@ -59,6 +62,7 @@ class ClaimVerificationService:
                     reason="No relevant reimbursement policy was found in the vector store",
                     decision_trace=["No retrieval hits were returned"],
                     selected_document_id=None,
+                    parsed_rule=None,
                 )
 
             selected_hit, parsed_rule = self._select_best_rule(retrieval_hits, request.treatment)
@@ -79,6 +83,7 @@ class ClaimVerificationService:
                         "No deterministic reimbursement limit could be extracted",
                     ],
                     selected_document_id=retrieval_hits[0].policy_document_id,
+                    parsed_rule=parsed_rule,
                 )
 
             claim_amount = Decimal(str(request.amount))
@@ -112,6 +117,7 @@ class ClaimVerificationService:
                 reason=reason,
                 decision_trace=decision_trace,
                 selected_document_id=selected_hit.policy_document_id,
+                parsed_rule=parsed_rule,
             )
         except ClaimVerificationError:
             raise
@@ -182,7 +188,30 @@ class ClaimVerificationService:
         reason: str,
         decision_trace: list[str],
         selected_document_id: int | None,
+        parsed_rule: ParsedPolicyRule | None,
     ) -> ClaimVerificationResponse:
+        gpt_raw = self.gpt_decision_service.decide(
+            treatment=request.treatment,
+            claim_amount=Decimal(str(request.amount)),
+            deterministic_decision=decision,
+            deterministic_approved_amount=approved_amount,
+            deterministic_reason=reason,
+            parsed_rule=parsed_rule,
+            retrieval_hits=retrieval_hits,
+        )
+        gpt_assessment = None
+        if gpt_raw["decision"] != "NOT_RUN":
+            gpt_assessment = GPTDecisionAssessment(
+                decision=gpt_raw["decision"],
+                confidence=gpt_raw["confidence"],
+                approved_amount=Decimal(gpt_raw["approved_amount"]),
+                reason=gpt_raw["reason"],
+                risk_flags=gpt_raw["risk_flags"],
+            )
+            decision_trace.append(f"GPT adjudication: {gpt_assessment.decision} ({gpt_assessment.confidence:.2f})")
+            if gpt_assessment.risk_flags:
+                decision_trace.append(f"GPT risk flags: {', '.join(gpt_assessment.risk_flags)}")
+
         response = ClaimVerificationResponse(
             claim_id=claim_id,
             status=decision,
@@ -207,6 +236,7 @@ class ClaimVerificationService:
                 for hit in retrieval_hits
             ],
             decision_trace=decision_trace,
+            gpt_assessment=gpt_assessment,
         )
 
         audit = ClaimVerificationAudit(
