@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import JSON, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -15,6 +15,9 @@ class PolicyDocument(Base):
     policy_version = Column(String(50), nullable=False, default="1.0")
     department = Column(String(100), nullable=False, default="Medical", index=True)
     status = Column(String(30), nullable=False, default="active", index=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    content_sha256 = Column(String(64), nullable=True, index=True)
     raw_text = Column(Text, nullable=False)
     metadata_json = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
