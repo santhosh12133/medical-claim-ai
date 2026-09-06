@@ -15,11 +15,8 @@ from database import UPLOAD_DIR, engine, get_db
 from models import Claim, ClaimEvent
 from models_user import User
 from ocr.extract import extract_text
-from rag.api.dependencies import get_claim_verification_service
 from rag.api.routes import router as rag_router
 from rag.config.logging import configure_logging
-from rag.config.settings import get_rag_settings
-from rag.services.verification_service import ClaimVerificationService
 from schemas import ClaimActionResponse, ClaimEventRead, ClaimRead, LoginRequest, LoginResponse, UserRead
 from services.claim_validation import extract_claim_fields, validate_claim_fields
 
@@ -73,8 +70,83 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash, user.password_salt):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token(user)
-    return LoginResponse(access_token=token, user=UserRead.model_validate(user))
+    token = create_access_token(subject=str(user.id), role=user.role)
+    return LoginResponse(access_token=token, token_type="bearer", role=user.role, message="Login successful")
+
+
+@app.get("/auth/me", response_model=UserRead)
+def read_current_user(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@app.get("/claims", response_model=List[ClaimRead])
+def list_claims(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(Claim).order_by(Claim.created_at.desc())
+    if current_user.role.lower() == "employee":
+        query = query.filter(Claim.user_id == current_user.id)
+    return query.all()
+
+
+@app.get("/claims/{claim_id}", response_model=ClaimRead)
+def get_claim(claim_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    claim = db.get(Claim, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if current_user.role.lower() != "admin" and claim.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have access to this claim")
+    return claim
+
+
+@app.get("/claims/{claim_id}/events", response_model=List[ClaimEventRead])
+def list_claim_events(claim_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    claim = db.get(Claim, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if current_user.role.lower() != "admin" and claim.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have access to this claim")
+    return (
+        db.query(ClaimEvent)
+        .filter(ClaimEvent.claim_id == claim_id)
+        .order_by(ClaimEvent.created_at.asc(), ClaimEvent.id.asc())
+        .all()
+    )
+
+
+def _record_event(
+    db: Session,
+    claim_id: int,
+    actor_user_id: int | None,
+    event_type: str,
+    message: str,
+    status_before: str | None = None,
+    status_after: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    db.add(
+        ClaimEvent(
+            claim_id=claim_id,
+            actor_user_id=actor_user_id,
+            event_type=event_type,
+            status_before=status_before,
+            status_after=status_after,
+            message=message,
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+    )
+
+
+def _validate_upload_content(filename: str, content: bytes) -> None:
+    """Validate the file signature as well as the extension to reduce spoofed uploads."""
+    suffix = Path(filename).suffix.lower()
+    signatures = {
+        ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".jpg": content.startswith(b"\xff\xd8\xff"),
+        ".jpeg": content.startswith(b"\xff\xd8\xff"),
+        ".webp": len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP",
+        ".pdf": content.startswith(b"%PDF-") or content.startswith(b"%PDF"),
+    }
+    if not signatures.get(suffix, False):
+        raise HTTPException(status_code=400, detail="File content does not match its extension")
 
 
 @app.post("/claims/upload", response_model=ClaimRead)
@@ -84,7 +156,6 @@ async def upload_claim(
     treatment: str | None = Form(None),
     current_user: User = Depends(require_employee),
     db: Session = Depends(get_db),
-    verification_service: ClaimVerificationService = Depends(get_claim_verification_service),
 ):
     del employee_name
 
@@ -142,10 +213,6 @@ async def upload_claim(
             metadata={"validation_passed": is_valid},
         )
         db.commit()
-
-        if is_valid and get_rag_settings().auto_decision_enabled:
-            verification_service.verify_stored_claim(claim.id)
-
         db.refresh(claim)
         return claim
     except HTTPException:
@@ -181,3 +248,28 @@ def approve_claim(
     db.commit()
     db.refresh(claim)
     return ClaimActionResponse(message="Claim approved", claim=claim)
+
+
+@app.patch("/claims/{claim_id}/reject", response_model=ClaimActionResponse)
+def reject_claim(
+    claim_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    claim = db.get(Claim, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    previous_status = claim.status
+    claim.status = "Rejected"
+    _record_event(
+        db,
+        claim_id=claim.id,
+        actor_user_id=current_user.id,
+        event_type="CLAIM_REJECTED",
+        message="Claim rejected by administrator",
+        status_before=previous_status,
+        status_after=claim.status,
+    )
+    db.commit()
+    db.refresh(claim)
+    return ClaimActionResponse(message="Claim rejected", claim=claim)
