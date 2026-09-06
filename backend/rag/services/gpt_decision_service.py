@@ -22,7 +22,9 @@ class GPTDecisionService:
     def __init__(self, settings: RagSettings) -> None:
         self.settings = settings
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=settings.gpt_timeout_seconds)
+        self.client = None
+        if settings.gpt_enabled:
+            self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=settings.gpt_timeout_seconds)
 
     def decide(
         self,
@@ -34,7 +36,7 @@ class GPTDecisionService:
         parsed_rule: ParsedPolicyRule | None,
         retrieval_hits: list[RetrievalHit],
     ) -> dict:
-        if not self.settings.gpt_enabled:
+        if not self.settings.gpt_enabled or self.client is None:
             return self._disabled_result()
 
         evidence = [
