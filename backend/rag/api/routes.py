@@ -2,7 +2,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import hashlib
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, status
+from sqlalchemy import func
 
 from auth_dependencies import require_admin
 from models_user import User
@@ -14,6 +15,7 @@ from rag.api.dependencies import (
     get_vector_repository_cached,
     get_verification_repository,
 )
+from rag.db.models import ClaimVerificationAudit
 from rag.exceptions import ClaimVerificationError, PolicyIngestionError
 from rag.schemas.policy import (
     PolicyDocumentRead,
@@ -21,7 +23,12 @@ from rag.schemas.policy import (
     PolicyMetadata,
     PolicyStatusResponse,
 )
-from rag.schemas.verification import ClaimVerificationRequest, ClaimVerificationResponse, VerificationAuditRead
+from rag.schemas.verification import (
+    ClaimVerificationRequest,
+    ClaimVerificationResponse,
+    DecisionMetricsRead,
+    VerificationAuditRead,
+)
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 PDF_SIGNATURE = b"%PDF-"
@@ -169,3 +176,42 @@ def list_verifications(
     verification_repository=Depends(get_verification_repository),
 ):
     return verification_repository.list_audits()
+
+
+@router.get("/metrics/decisions", response_model=DecisionMetricsRead)
+def decision_metrics(
+    current_user: User = Depends(require_admin),
+    verification_repository=Depends(get_verification_repository),
+):
+    db = verification_repository.db
+    total = db.query(func.count(ClaimVerificationAudit.id)).scalar() or 0
+    auto_approved = (
+        db.query(func.count(ClaimVerificationAudit.id))
+        .filter(ClaimVerificationAudit.auto_decision == "approved")
+        .scalar()
+        or 0
+    )
+    auto_rejected = (
+        db.query(func.count(ClaimVerificationAudit.id))
+        .filter(ClaimVerificationAudit.auto_decision == "rejected")
+        .scalar()
+        or 0
+    )
+    human_review = (
+        db.query(func.count(ClaimVerificationAudit.id))
+        .filter(ClaimVerificationAudit.auto_decision == "human")
+        .scalar()
+        or 0
+    )
+    average_confidence = db.query(func.avg(ClaimVerificationAudit.confidence)).scalar() or 0
+    autonomous = auto_approved + auto_rejected
+    rate = autonomous / total * 100 if total else 0
+    return DecisionMetricsRead(
+        total_verifications=total,
+        auto_approved=auto_approved,
+        auto_rejected=auto_rejected,
+        human_review=human_review,
+        autonomous_decision_rate_percent=round(rate, 2),
+        manual_review_reduction_percent=round(rate, 2),
+        average_confidence=round(float(average_confidence), 4),
+    )
