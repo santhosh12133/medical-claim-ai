@@ -25,3 +25,17 @@ class Claim(Base):
     file_path = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ClaimEvent(Base):
+    __tablename__ = "claim_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    claim_id = Column(Integer, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = Column(String(50), nullable=False, index=True)
+    status_before = Column(String(30), nullable=True)
+    status_after = Column(String(30), nullable=True)
+    message = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
