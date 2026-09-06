@@ -57,3 +57,17 @@ class ClaimRead(ClaimBase):
 class ClaimActionResponse(BaseModel):
     message: str
     claim: ClaimRead
+
+
+class ClaimEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    claim_id: int
+    actor_user_id: Optional[int] = None
+    event_type: str
+    status_before: Optional[str] = None
+    status_after: Optional[str] = None
+    message: str
+    metadata_json: Optional[str] = None
+    created_at: datetime
