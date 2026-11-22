@@ -22,6 +22,9 @@
 #   --no-firewall           do not open ports 80/443 in the host firewall
 #   --no-swap               do not create a swap file on small machines
 #   --no-backups            do not install the daily backup job
+#
+# Environment (optional): MCA_ADMIN_PASSWORD / MCA_EMPLOYEE_PASSWORD set the new accounts' passwords
+# (12+ characters) instead of generating them. Used by deploy/oracle-cloud-init.sh.
 set -euo pipefail
 
 REPO_URL="https://github.com/santhosh12133/medical-claim-ai.git"
@@ -60,7 +63,7 @@ while [ $# -gt 0 ]; do
     --no-swap) SWAP=0; shift ;;
     --no-backups) BACKUPS=0; shift ;;
     --public-ip) PUBLIC_IP_OVERRIDE="${2:?}"; shift 2 ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
 done
@@ -205,9 +208,10 @@ with SessionLocal() as db:
     print(db.query(User).filter(User.email.in_(['employee@demo.com', 'admin@demo.com'])).count())" | tail -1)
 [ "${DEMO_LEFT:-0}" = "0" ] || warn "Demo accounts with public passwords exist on this server; delete them (see docs/deploy-free-server.md)."
 
-create_account() {  # create_account EMAIL NAME ROLE
-  local output
-  if output=$(api_python api python scripts/create_user.py --email "$1" --name "$2" --role "$3" 2>&1); then
+create_account() {  # create_account EMAIL NAME ROLE [PASSWORD]
+  local output env_args=()
+  [ -z "${4:-}" ] || env_args=(-e "MCA_PASSWORD=$4")
+  if output=$(api_python "${env_args[@]}" api python scripts/create_user.py --email "$1" --name "$2" --role "$3" 2>&1); then
     echo "$output"
     local password; password=$(printf '%s\n' "$output" | sed -n 's/^Generated password.*: //p')
     if [ -n "$password" ]; then
@@ -220,8 +224,12 @@ create_account() {  # create_account EMAIL NAME ROLE
     printf '%s\n' "$output"; die "Could not create the account $1"
   fi
 }
-if [ -n "$ADMIN_EMAIL" ]; then log "Admin account"; create_account "$ADMIN_EMAIL" "$ADMIN_NAME" admin; fi
-if [ -n "$EMPLOYEE_EMAIL" ]; then log "Employee account"; create_account "$EMPLOYEE_EMAIL" "$EMPLOYEE_NAME" employee; fi
+if [ -n "$ADMIN_EMAIL" ]; then
+  log "Admin account"; create_account "$ADMIN_EMAIL" "$ADMIN_NAME" admin "${MCA_ADMIN_PASSWORD:-}"
+fi
+if [ -n "$EMPLOYEE_EMAIL" ]; then
+  log "Employee account"; create_account "$EMPLOYEE_EMAIL" "$EMPLOYEE_NAME" employee "${MCA_EMPLOYEE_PASSWORD:-}"
+fi
 
 if [ "$BACKUPS" -eq 1 ]; then
   log "Installing the daily backup job (02:30, keeps 7 days in /var/backups/medical-claim-ai)"

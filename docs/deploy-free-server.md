@@ -2,7 +2,7 @@
 
 This puts the whole app (website, API, background worker, PostgreSQL) on one server behind Caddy, with HTTPS.
 One script does the installation; you only create the server. About 30 minutes, most of it waiting for the
-first build.
+first build. **No terminal is needed**: the server installs itself on first boot (step 2).
 
 What you get:
 
@@ -38,11 +38,13 @@ Console → **Compute → Instances → Create instance**:
 | Networking | Create a new virtual cloud network with a **public subnet**; **assign a public IPv4 address** |
 | SSH keys | "Generate a key pair" and **download the private key** (or paste your own public key) |
 | Boot volume | Default (about 47 GB) is fine |
+| **Initialization script** | Click **Show advanced options → Management → Paste cloud-init script**, and paste [`deploy/oracle-cloud-init.sh`](../deploy/oracle-cloud-init.sh) **after editing its first lines**: your e-mail and a password of 12+ characters (optionally a second, employee login) |
 
 If you see **"Out of capacity"**, try another availability domain, try again later, or use 1 OCPU / 6 GB
 (slower, but it works).
 
-When the instance is **Running**, copy its **Public IP address**.
+Click **Create**. When the instance is **Running**, copy its **Public IP address**, and do step 3 right
+away: the server is already installing itself.
 
 ## 3. Open ports 80 and 443 in Oracle's firewall
 
@@ -56,9 +58,19 @@ Oracle blocks everything except SSH by default. Instance page → the subnet lin
 
 (The server's own firewall is opened by the setup script.)
 
-## 4. Run the setup script
+## 4. Open the app
 
-From your computer:
+After 15–20 minutes open `https://<public-ip-with-dashes>.sslip.io`. For IP `140.238.1.2` that is
+`https://140-238-1-2.sslip.io`. Sign in on the **admin** login page with the e-mail and password from the
+initialization script. That's it.
+
+If the page doesn't load after 25 minutes, check step 3 first. The install log is at
+`/var/log/medical-claim-ai-setup.log` on the server: in the Oracle console click the **Cloud Shell** icon
+(`>_`, top right) and SSH in as below, or use the Instance → **Console connection** page.
+
+### Alternative: run the script yourself over SSH
+
+Skip the initialization script and, once the instance is running, from your computer:
 
 ```bash
 chmod 600 ~/Downloads/ssh-key-*.key

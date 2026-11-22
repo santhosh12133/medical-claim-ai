@@ -380,6 +380,19 @@ jobs:
           echo "::add-mask::$ADMIN_PASSWORD"
           sudo deploy/verify-deployment.sh http://localhost owner@example.com "$ADMIN_PASSWORD"
 
+      - name: Password chosen in advance (the Oracle first-boot path)
+        run: |
+          fail() { echo "[FAIL] $1"; exit 1; }
+          sudo MCA_EMPLOYEE_PASSWORD='chosen-in-advance-42' bash deploy/setup-server.sh --domain none --public-ip localhost \
+            --app-dir "$GITHUB_WORKSPACE" --no-update --no-firewall --no-swap \
+            --employee-email preset@example.com --employee-name "Preset User" | tee preset.log
+          ! sudo grep -q 'preset@example.com' "$CREDS" || fail "chosen password was written to the credentials file"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email": "preset@example.com", "password": "chosen-in-advance-42"}')
+          [ "$code" = 200 ] || fail "login with the chosen password returned $code"; echo "[PASS] login with the chosen password"
+          bash -n deploy/oracle-cloud-init.sh && grep -q 'MCA_ADMIN_PASSWORD="$ADMIN_PASSWORD"' deploy/oracle-cloud-init.sh \
+            && echo "[PASS] first-boot script passes the password through the environment"
+
       - name: Backup check
         run: |
           fail() { echo "[FAIL] $1"; exit 1; }
