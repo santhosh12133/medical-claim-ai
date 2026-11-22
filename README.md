@@ -458,6 +458,15 @@ The detailed environment and deployment instructions live in [`docs/production-d
 
 ## Deploy to a server (free option)
 
+**No card, no server: live demo in GitHub Codespaces.**
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/santhosh12133/medical-claim-ai)
+Click the badge (free GitHub account: 60 hours a month on the 2-core machine). The app builds and starts
+by itself (about 10 minutes the first time) and prints its address and logins. Make port 80 public in the
+**PORTS** tab to share the link. It runs only while the codespace is running; see
+[`.devcontainer/README.md`](.devcontainer/README.md).
+
+**Permanent server:**
+
 One command installs the whole stack on an Ubuntu server (for example a free Oracle Cloud Always Free VM)
 with HTTPS, a real admin account, no demo passwords and daily backups:
 

@@ -14,6 +14,8 @@
 #   --employee-name NAME    its display name; bills are matched to it (default "Demo Employee")
 #   --domain auto|none|NAME auto (default): free HTTPS address <ip>.sslip.io; none: plain HTTP on the IP;
 #                           NAME: your own domain (point its DNS A record at this server first)
+#   --origin URL            the app is already behind another HTTPS proxy at URL (e.g. GitHub Codespaces):
+#                           serve plain HTTP on port 80 and build the website for that address
 #   --public-ip ADDR        use ADDR instead of the detected public IP (e.g. when behind NAT)
 #   --no-demo-policies      do not load the 25 synthetic demo reimbursement policies
 #   --app-dir DIR           install directory (default /opt/medical-claim-ai)
@@ -42,6 +44,7 @@ SWAP=1
 BACKUPS=1
 CREDENTIALS_FILE="/root/medical-claim-ai-credentials.txt"
 PUBLIC_IP_OVERRIDE=""
+ORIGIN_OVERRIDE=""
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARNING: %s\033[0m\n' "$*" >&2; }
@@ -63,7 +66,8 @@ while [ $# -gt 0 ]; do
     --no-swap) SWAP=0; shift ;;
     --no-backups) BACKUPS=0; shift ;;
     --public-ip) PUBLIC_IP_OVERRIDE="${2:?}"; shift 2 ;;
-    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+    --origin) ORIGIN_OVERRIDE="${2%/}"; shift 2 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
 done
@@ -137,9 +141,12 @@ cd "$APP_DIR"
 COMPOSE=(docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml)
 
 # ----------------------------------------------------------------------------- address
+if [ -n "$ORIGIN_OVERRIDE" ]; then DOMAIN="origin"; fi
 PUBLIC_IP="$PUBLIC_IP_OVERRIDE"
-[ -n "$PUBLIC_IP" ] || PUBLIC_IP=$(curl -fsS4 --max-time 6 https://api.ipify.org 2>/dev/null || curl -fsS4 --max-time 6 https://ifconfig.me 2>/dev/null || true)
+[ -n "$PUBLIC_IP" ] || [ "$DOMAIN" = "origin" ] || PUBLIC_IP=$(curl -fsS4 --max-time 6 https://api.ipify.org 2>/dev/null || curl -fsS4 --max-time 6 https://ifconfig.me 2>/dev/null || true)
 case "$DOMAIN" in
+  origin)
+    SITE_ADDRESS=":80"; ORIGIN="$ORIGIN_OVERRIDE" ;;
   auto)
     if [[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
       SITE_ADDRESS="${PUBLIC_IP//./-}.sslip.io"; ORIGIN="https://$SITE_ADDRESS"

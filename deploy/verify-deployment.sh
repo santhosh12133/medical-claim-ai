@@ -3,6 +3,7 @@
 #   sudo deploy/verify-deployment.sh http://localhost admin@example.com 'admin-password'
 set -euo pipefail
 BASE="${1:?base URL}"; ADMIN_EMAIL="${2:?admin email}"; ADMIN_PASSWORD="${3:?admin password}"
+PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-$BASE}"  # address the website was built for, if it differs from BASE
 cd "$(dirname "$0")/.."
 COMPOSE=(docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml)
 FAILED=0
@@ -15,7 +16,7 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 check "Website served at /" bash -c "curl -fsS '$BASE/' | grep -qi '<div id=\"root\"'"
 check "Deep link served by the SPA" bash -c "curl -fsS '$BASE/admin/login' | grep -qi '<div id=\"root\"'"
 BUNDLE=$(curl -fsS "$BASE/" | grep -o '/assets/[^"]*\.js' | head -1)
-check "Bundle calls the API at $BASE/api" bash -c "curl -fsS '$BASE$BUNDLE' | grep -qF '$BASE/api'"
+check "Bundle calls the API at $PUBLIC_ORIGIN/api" bash -c "curl -fsS '$BASE$BUNDLE' | grep -qF '$PUBLIC_ORIGIN/api'"
 check "Bundle has no demo passwords" bash -c "! curl -fsS '$BASE$BUNDLE' | grep -qE 'admin123|employee123'"
 check "API health through /api" bash -c "curl -fsS '$BASE/api/health/ready' | grep -q ready"
 check "Swagger UI loads /api/openapi.json" bash -c "curl -fsS '$BASE/api/docs' | grep -q '/api/openapi.json'"

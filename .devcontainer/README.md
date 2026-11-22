@@ -1,0 +1,24 @@
+# Medical Claim AI: live demo in GitHub Codespaces
+
+The app is starting in the **terminal** below. The first start builds everything (about 10 minutes),
+and later starts take about a minute.
+
+When it's ready, the terminal prints:
+
+- the address, `https://<codespace-name>-80.app.github.dev`
+- an **admin** login and an **employee** login, generated for this codespace
+
+To try it, run `bash .devcontainer/make-sample-bill.sh` in the terminal. It writes `sample-bill.png`, which you
+download from the file explorer (right-click → Download). Open the address, sign in on the employee page and
+upload the bill. Then sign in on the admin page to review it, with the extracted fields, the agent's steps
+and the cited policy evidence.
+
+**To share it** (for example in an interview), open the **PORTS** tab, right-click port **80**, and choose
+**Port Visibility → Public**. Anyone with the link can then open it while the codespace is running.
+
+**Free hours:** a personal GitHub account includes 120 core hours a month, which is 60 hours on this 2-core
+machine. The codespace stops by itself after 30 minutes without activity. Stop it yourself from
+github.com/codespaces when you're done. Your data is kept until you delete the codespace.
+
+If the logins scroll away: `sudo cat /root/medical-claim-ai-credentials.txt`
+To restart the app: `bash .devcontainer/start.sh`

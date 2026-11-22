@@ -1,0 +1,25 @@
+{
+  "name": "Medical Claim AI (live demo)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [80],
+  "portsAttributes": {
+    "80": {
+      "label": "Medical Claim AI",
+      "onAutoForward": "notify"
+    }
+  },
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [".devcontainer/README.md"]
+    }
+  }
+}

@@ -338,7 +338,7 @@ jobs:
           python-version: "3.11"
 
       - name: ShellCheck deployment scripts
-        run: shellcheck -S warning deploy/*.sh
+        run: shellcheck -S warning deploy/*.sh .devcontainer/*.sh
 
       - name: Fresh install with deploy/setup-server.sh (no demo users; admin + employee accounts)
         run: >-
@@ -393,6 +393,19 @@ jobs:
           bash -n deploy/oracle-cloud-init.sh && grep -q 'MCA_ADMIN_PASSWORD="$ADMIN_PASSWORD"' deploy/oracle-cloud-init.sh \
             && echo "[PASS] first-boot script passes the password through the environment"
 
+      - name: Codespaces start script (simulated codespace address)
+        env:
+          CODESPACE_NAME: ci-demo
+          GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: app.github.dev
+        run: |
+          python3 -c "import json; json.load(open('.devcontainer/devcontainer.json'))"
+          bash .devcontainer/start.sh | tee codespace.log
+          grep -q "running at:  https://ci-demo-80.app.github.dev" codespace.log
+          ADMIN_PASSWORD=$(sudo grep ' admin@demo.local ' "$CREDS" | tail -1 | sed 's/.*password: //')
+          echo "::add-mask::$ADMIN_PASSWORD"
+          sudo PUBLIC_ORIGIN=https://ci-demo-80.app.github.dev deploy/verify-deployment.sh http://localhost admin@demo.local "$ADMIN_PASSWORD"
+          bash .devcontainer/make-sample-bill.sh && file sample-bill.png | grep -q "PNG image"
+
       - name: Backup check
         run: |
           fail() { echo "[FAIL] $1"; exit 1; }
@@ -418,3 +431,31 @@ jobs:
             browser-e2e/
             compose.log
           if-no-files-found: ignore
+
+  codespaces:
+    name: Codespaces devcontainer (built with the Dev Containers CLI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Build and start the devcontainer (runs .devcontainer/start.sh like a codespace start)
+        run: |
+          npm install -g @devcontainers/cli
+          devcontainer up --workspace-folder . 2>&1 | tee devcontainer.log
+          grep -q "Medical Claim AI is running at" devcontainer.log
+
+      - name: Verify the app inside the devcontainer
+        run: |
+          devcontainer exec --workspace-folder . bash -c '
+            set -e
+            sudo apt-get update -qq && sudo apt-get install -y -qq iproute2 python3 >/dev/null
+            PW=$(sudo grep " admin@demo.local " /root/medical-claim-ai-credentials.txt | tail -1 | sed "s/.*password: //")
+            sudo deploy/verify-deployment.sh http://localhost admin@demo.local "$PW"
+            bash .devcontainer/make-sample-bill.sh'
