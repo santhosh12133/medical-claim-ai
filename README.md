@@ -132,7 +132,7 @@ flowchart LR
 | Field extraction (OCR + NLP) | **96.0%** field accuracy on 120 held-out synthetic invoices (720 field checks); 90.3% with single-pass OCR | `python scripts/benchmark_extraction.py --seed 101` / `--seed 202`; `backend/eval/extraction_heldout_seeds_101_202.json` |
 | Policy retrieval | hit-rate@1 = 1.0 on 32 labelled claims (BM25-only and hybrid) | `python scripts/evaluate_rag.py [--embeddings]` |
 | Policy decisions | 32/32 correct offline; original pipeline 1/32 (no policy retrieved for 30) | `python scripts/evaluate_rag.py`; [`docs/rag-pipeline.md`](docs/rag-pipeline.md) |
-| End-to-end | PostgreSQL + API + worker + real embeddings, 12 failure scenarios | CI job "End-to-end"; `scripts/e2e_check.py` |
+| End-to-end | PostgreSQL + API + worker + real embeddings: 12/12 failure scenarios pass; 17/36 synthetic claims auto-finalised, 0 wrong; 24–132 claims/min | CI job "End-to-end"; `scripts/e2e_check.py` |
 
 All datasets are **synthetic** (generated invoices, demo policies). They are regression guards, not proof of
 real-world accuracy, throughput or review reduction. See the audit report for what is and is not verified.
