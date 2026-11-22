@@ -26,6 +26,7 @@ Medical Claim AI is a production-oriented full-stack application that turns medi
 - [Repository structure](#repository-structure)
 - [Documentation](#documentation)
 - [Local development](#local-development)
+- [Deploy to a server (free option)](#deploy-to-a-server-free-option)
 - [Docker deployment](#docker-deployment)
 - [API overview](#api-overview)
 - [Testing and evaluation](#testing-and-evaluation)
@@ -454,6 +455,19 @@ npm run dev
 The detailed environment and deployment instructions live in [`docs/production-deployment.md`](docs/production-deployment.md).
 
 ---
+
+## Deploy to a server (free option)
+
+One command installs the whole stack on an Ubuntu server (for example a free Oracle Cloud Always Free VM)
+with HTTPS, a real admin account, no demo passwords and daily backups:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/santhosh12133/medical-claim-ai/main/deploy/setup-server.sh \
+  | sudo bash -s -- --admin-email you@example.com
+```
+
+Step-by-step guide, including creating the free Oracle VM: [`docs/deploy-free-server.md`](docs/deploy-free-server.md).
+The script is tested in CI on fresh x86 and Arm Ubuntu runners (CI job "Server setup script").
 
 ## Docker deployment
 

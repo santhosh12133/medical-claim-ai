@@ -1,0 +1,29 @@
+# One public address for the whole app: the website at /, the API at /api/.
+# SITE_ADDRESS is a domain name (automatic HTTPS from Let's Encrypt) or ":80" (plain HTTP, no domain).
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	request_body {
+		max_size 25MB
+	}
+
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

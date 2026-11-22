@@ -1,0 +1,44 @@
+# Production overlay for a single server. Use together with the main file:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+# deploy/setup-server.sh does this for you.
+#
+# Differences from the base file:
+# - Only Caddy is reachable from outside (ports 80/443). The API (8000), website (8080) and database are not
+#   published, because Docker-published ports bypass the host firewall.
+# - The API trusts X-Forwarded-For from Caddy, so login rate limiting sees each visitor's real address.
+#   Safe only because nothing but Caddy can reach the API port.
+
+services:
+  api:
+    ports: !reset []
+    environment:
+      FORWARDED_ALLOW_IPS: "*"
+      UVICORN_ROOT_PATH: /api   # the API is served under /api, so Swagger UI must load /api/openapi.json
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - medical_claims
+
+volumes:
+  caddy_data:
+  caddy_config:

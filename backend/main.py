@@ -115,7 +115,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             headers={"Retry-After": str(login_limiter.retry_after(key))},
         )
 
-    user = db.execute(select(User).where(User.email == payload.email.strip())).scalar_one_or_none()
+    user = db.execute(select(User).where(func.lower(User.email) == payload.email.strip().lower())).scalar_one_or_none()
     if not user or not verify_password(payload.password, user.password_hash, user.password_salt):
         login_limiter.hit(key)
         raise HTTPException(status_code=401, detail="Invalid credentials")

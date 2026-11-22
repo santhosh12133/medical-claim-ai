@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -53,7 +54,8 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
         page.goto(f"{frontend}/employee/login")
         expect(page.locator('input[type="password"]')).to_have_value("")  # no pre-filled demo password
         step(page, "employee-login-page-empty")
-        sign_in(page, "employee", "employee@demo.com", "employee123")
+        sign_in(page, "employee", os.getenv("E2E_EMPLOYEE_EMAIL", "employee@demo.com"),
+                os.getenv("E2E_EMPLOYEE_PASSWORD", "employee123"))
         step(page, "employee-dashboard")
 
         page.goto(f"{frontend}/employee/upload")
@@ -79,7 +81,7 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
         # ------------------------------------------------------------------- admin
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         watch(page)
-        sign_in(page, "admin", "admin@demo.com", "admin123")
+        sign_in(page, "admin", os.getenv("E2E_ADMIN_EMAIL", "admin@demo.com"), os.getenv("E2E_ADMIN_PASSWORD", "admin123"))
         expect(page.locator(".metric-card").first).to_be_visible()
         step(page, "admin-dashboard")
 

@@ -167,7 +167,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.key.outputs.present == 'true'
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt anthropic
 
       - name: Live LLM adjudication, grounded Q&A and agent planning
         if: steps.key.outputs.present == 'true'
@@ -312,3 +312,96 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  server-setup:
+    name: Server setup script (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64, like Oracle Ampere
+            runner: ubuntu-24.04-arm
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml
+      CREDS: /root/medical-claim-ai-credentials.txt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python (for the browser test)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: ShellCheck deployment scripts
+        run: shellcheck -S warning deploy/*.sh
+
+      - name: Fresh install with deploy/setup-server.sh (no demo users; admin + employee accounts)
+        run: >-
+          sudo bash deploy/setup-server.sh --domain none --public-ip localhost --app-dir "$GITHUB_WORKSPACE"
+          --no-update --no-firewall --no-swap --admin-email Owner@Example.com
+          --employee-email employee@example.com --employee-name "Employee Demo"
+
+      - name: Verify the deployment through the web server
+        run: |
+          ADMIN_PASSWORD=$(sudo grep ' admin ' "$CREDS" | tail -1 | sed 's/.*password: //')
+          echo "::add-mask::$ADMIN_PASSWORD"
+          sudo deploy/verify-deployment.sh http://localhost owner@example.com "$ADMIN_PASSWORD"
+
+      - name: Browser test through the web server (created accounts, not demo users)
+        run: |
+          sudo $COMPOSE exec -T api python scripts/stack_smoke_test.py --make-bill /app/logs/browser_bill.png
+          sudo $COMPOSE cp api:/app/logs/browser_bill.png ./browser_bill.png
+          sudo chmod a+r browser_bill.png
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          E2E_ADMIN_PASSWORD=$(sudo grep ' admin ' "$CREDS" | tail -1 | sed 's/.*password: //')
+          E2E_EMPLOYEE_PASSWORD=$(sudo grep ' employee ' "$CREDS" | tail -1 | sed 's/.*password: //')
+          echo "::add-mask::$E2E_ADMIN_PASSWORD"; echo "::add-mask::$E2E_EMPLOYEE_PASSWORD"
+          export E2E_ADMIN_EMAIL=owner@example.com E2E_EMPLOYEE_EMAIL=employee@example.com
+          export E2E_ADMIN_PASSWORD E2E_EMPLOYEE_PASSWORD
+          python backend/scripts/browser_e2e.py --frontend http://localhost --bill browser_bill.png --out browser-e2e --timeout 600
+
+      - name: Re-run the script (update path) keeps secrets, data and accounts
+        run: |
+          fail() { echo "[FAIL] $1"; exit 1; }
+          before=$(sudo grep -E '^(POSTGRES_PASSWORD|SECRET_KEY)=' .env | sha256sum)
+          sudo bash deploy/setup-server.sh --domain none --public-ip localhost --app-dir "$GITHUB_WORKSPACE" \
+            --no-update --no-firewall --no-swap --admin-email owner@example.com | tee rerun.log
+          after=$(sudo grep -E '^(POSTGRES_PASSWORD|SECRET_KEY)=' .env | sha256sum)
+          [ "$before" = "$after" ] || fail "secrets changed"; echo "[PASS] secrets unchanged"
+          grep -q "already exists; password unchanged" rerun.log || fail "admin account not kept"; echo "[PASS] admin account kept"
+          [ "$(sudo grep -c ' admin ' "$CREDS")" = 1 ] || fail "second admin password issued"; echo "[PASS] no second password issued"
+          ADMIN_PASSWORD=$(sudo grep ' admin ' "$CREDS" | tail -1 | sed 's/.*password: //')
+          echo "::add-mask::$ADMIN_PASSWORD"
+          sudo deploy/verify-deployment.sh http://localhost owner@example.com "$ADMIN_PASSWORD"
+
+      - name: Backup check
+        run: |
+          fail() { echo "[FAIL] $1"; exit 1; }
+          sudo BACKUP_DIR=/tmp/mca-backups deploy/backup.sh
+          dump=$(sudo sh -c 'ls /tmp/mca-backups/db-*.dump' | head -1)
+          sudo cat "$dump" | sudo $COMPOSE exec -T db pg_restore --list > restore-list.txt || fail "pg_restore failed"
+          grep -q "TABLE DATA public claims" restore-list.txt || fail "claims table missing from dump"; echo "[PASS] database dump readable"
+          sudo sh -c 'tar -tzf /tmp/mca-backups/files-*.tar.gz' | grep -q '^uploads/.' || fail "uploads missing"; echo "[PASS] uploaded files archived"
+
+      - name: Container logs
+        if: always()
+        run: |
+          sudo $COMPOSE ps || true
+          sudo $COMPOSE logs --no-color > compose.log 2>&1 || true
+          tail -n 120 compose.log || true
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-setup-${{ matrix.runner }}
+          path: |
+            browser-e2e/
+            compose.log
+          if-no-files-found: ignore

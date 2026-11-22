@@ -141,6 +141,12 @@ def test_login_rate_limit(client):
     main.login_limiter.reset("testclient:admin@test.com")
 
 
+def test_login_email_is_case_insensitive(client):
+    response = client.post("/auth/login", json={"email": "  Admin@Test.COM ", "password": "admin123"})
+    assert response.status_code == 200, response.text
+    assert response.json()["role"] == "admin"
+
+
 def test_upload_duplicate_and_in_flight_guards(client):
     employee = _token(client, "employee@test.com", "employee123")
     admin = _token(client, "admin@test.com", "admin123")
