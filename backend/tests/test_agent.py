@@ -186,3 +186,10 @@ def test_step_budget_escalates():
     state = ClaimAgent(registry, Looping(), max_steps=3, sleep=lambda s: None).run(AgentState(claim_id=1))
     assert state.outcome == "escalated"
     assert state.history[-1].tool == "escalate_to_human"
+
+
+def test_ocr_pass_disagreement_blocks_autonomous_completion():
+    registry, calls = make_registry([GOOD_TEXT], verifications=[AUTO_OK], risks=["OCR_FIELD_DISAGREEMENT"])
+    state = run(registry)
+    assert state.outcome == "escalated"
+    assert "OCR_FIELD_DISAGREEMENT" in state.escalation_reason

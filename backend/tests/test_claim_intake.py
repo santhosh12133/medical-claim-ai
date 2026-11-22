@@ -184,3 +184,20 @@ def test_single_candidate_behaves_like_single_pass():
 
     text = "Apollo Hospital\nPatient Santhosh\nAmount 12500\nDate: 12-01-2026"
     assert extract_structured_multi([text])["fields"] == extract_structured(text)["fields"]
+
+
+def test_category_follows_the_winning_treatment_and_disagreement_is_reported():
+    # Regression (CI e2e): passes disagreed on a skewed scan, category was voted separately, and a
+    # hospitalization bill was capped at the pharmacy limit and auto-finalised.
+    from services.claim_validation import extract_structured_multi
+
+    base = "City Hospital\nPatient: Ravi Kumar\nDate: 23/01/2026\nNet Payable: Rs. 53,150.00\n"
+    result = extract_structured_multi([base + "Treatment: Pharmacy", base + "Treatment: Hospitalization",
+                                       base + "Treatment: Pharmacy"])
+    fields = result["fields"]
+    assert fields["treatment"] == "Pharmacy"
+    assert fields["policy_category"] == "Pharmacy"           # consistent with the treatment actually used
+    assert result["critical_disagreements"] == ["treatment"]  # routed to a human by the agent
+
+    agreeing = extract_structured_multi([base + "Treatment: MRI scan", base + "Treatment: MRI scan"])
+    assert agreeing["critical_disagreements"] == []

@@ -47,6 +47,7 @@ class ClaimAgentTools:
         fields = structured["fields"]
         with self.session_factory() as db:
             claim = db.get(Claim, state.claim_id)
+            state.facts.setdefault("employee_treatment", bool(claim.treatment))
             if claim.treatment:  # the employee's own label wins over OCR
                 fields["treatment"] = claim.treatment
                 fields["policy_category"] = get_taxonomy().resolve(claim.treatment) or fields.get("policy_category")
@@ -59,6 +60,9 @@ class ClaimAgentTools:
             db.commit()
         state.facts["fields"] = fields
         state.facts["missing_fields"] = missing
+        disagreements = [name for name in structured.get("critical_disagreements", [])
+                         if not (name == "treatment" and state.facts.get("employee_treatment"))]
+        state.facts["ocr_disagreements"] = disagreements
         state.facts["category_candidates"] = _category_candidates(structured, fields)
         state.facts["tried_categories"] = [fields["policy_category"]] if fields.get("policy_category") else []
         return {"valid": valid, "missing": missing, "category": fields.get("policy_category"),
@@ -89,6 +93,9 @@ class ClaimAgentTools:
         with self.session_factory() as db:
             claim = db.get(Claim, state.claim_id)
             risk = _assess(db, claim, state.facts.get("ocr_text"))
+            if state.facts.get("ocr_disagreements"):
+                risk.add("OCR_FIELD_DISAGREEMENT",
+                         f"OCR passes read different values for: {', '.join(state.facts['ocr_disagreements'])}")
             claim.risk_flags_json = risk.flags
             blocking = [flag for flag in risk.flags if flag in BLOCKING_FLAGS]
             claim.status = "Needs Attention" if blocking else "Pending Review"

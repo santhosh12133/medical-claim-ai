@@ -274,7 +274,7 @@ def extract_structured(text: str) -> Dict[str, Any]:
     }
 
 
-_VOTED_FIELDS = ("patient_name", "hospital_name", "treatment", "policy_category", "amount", "claim_date", "invoice_number")
+_VOTED_FIELDS = ("patient_name", "hospital_name", "treatment", "amount", "claim_date", "invoice_number")
 
 
 def _vote_key(value: Any) -> str:
@@ -307,9 +307,24 @@ def extract_structured_multi(texts: list[str]) -> Dict[str, Any]:
         merged["fields"][name] = results[winner[0]]["fields"][name]
         merged["confidence"][name] = results[winner[0]]["confidence"].get(name, 0.0)
         agreement[name] = round(len(winner) / len(results), 3)
+    # The category must follow the winning treatment; voting it separately once produced
+    # "treatment=Pharmacy, category=Hospitalization" and a wrong cap.
+    treatment = merged["fields"].get("treatment")
+    if treatment:
+        merged["fields"]["policy_category"] = get_taxonomy().resolve(treatment) or merged["fields"].get("policy_category")
     merged["field_agreement"] = agreement
+    merged["critical_disagreements"] = _critical_disagreements(results)
     merged["ocr_passes"] = len(results)
     return merged
+
+
+def _critical_disagreements(results: list[Dict[str, Any]]) -> list[str]:
+    """Decision-critical fields on which OCR passes read *different* values (not merely missing ones)."""
+    taxonomy = get_taxonomy()
+    categories = {taxonomy.resolve(result["fields"]["treatment"]) or _vote_key(result["fields"]["treatment"])
+                  for result in results if result["fields"].get("treatment")}
+    amounts = {round(float(result["fields"]["amount"]), 2) for result in results if result["fields"].get("amount") is not None}
+    return [name for name, values in (("treatment", categories), ("amount", amounts)) if len(values) > 1]
 
 
 def structured_to_json(structured: Dict[str, Any]) -> Dict[str, Any]:

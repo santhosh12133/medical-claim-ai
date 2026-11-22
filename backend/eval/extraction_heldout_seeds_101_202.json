@@ -51,10 +51,10 @@
         "skewed_scan": 0.8167
       },
       "ocr_extraction_seconds": {
-        "mean": 1.081,
-        "median": 1.167,
-        "p95": 1.628,
-        "max": 2.2
+        "mean": 1.047,
+        "median": 1.183,
+        "p95": 1.586,
+        "max": 1.613
       }
     },
     "seed_202_single_pass": {
@@ -107,10 +107,10 @@
         "skewed_scan": 0.7833
       },
       "ocr_extraction_seconds": {
-        "mean": 1.022,
-        "median": 1.149,
-        "p95": 1.561,
-        "max": 1.773
+        "mean": 1.05,
+        "median": 1.154,
+        "p95": 1.608,
+        "max": 1.815
       }
     }
   },
