@@ -62,7 +62,7 @@ export function RoleLoginPage({ role, title, subtitle }) {
           <button type="submit">Sign in</button>
           {loading ? <p className="hint">Restoring session...</p> : null}
           {message ? <p className="status-text">{message}</p> : null}
-          <p className="hint">Demo accounts are created with backend/scripts/seed_demo_users.py (see README).</p>
+          <p className="hint">No account yet? Ask your administrator to create one.</p>
         </form>
       </SectionCard>
     </AppShell>
