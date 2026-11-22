@@ -198,6 +198,9 @@ grep -q '^AUTO_DECISION_ENABLED=true' .env && warn "AUTO_DECISION_ENABLED=true: 
 log "Building and starting the app (the first build takes 5-15 minutes)"
 "${COMPOSE[@]}" up -d --build --remove-orphans --wait --wait-timeout 900 \
   || { "${COMPOSE[@]}" ps; "${COMPOSE[@]}" logs --tail 80; die "The app did not become healthy; logs above"; }
+# The website is built for one public address. Compose can keep the old container running after a rebuild
+# (seen on arm64), so always recreate it: it's stateless nginx and restarts in about a second.
+"${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 120 frontend
 "${COMPOSE[@]}" ps
 
 api_python() { "${COMPOSE[@]}" exec -T "$@"; }

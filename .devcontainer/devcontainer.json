@@ -1,6 +1,6 @@
 {
   "name": "Medical Claim AI (live demo)",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "image": "mcr.microsoft.com/devcontainers/base:noble",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
