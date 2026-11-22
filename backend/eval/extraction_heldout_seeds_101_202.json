@@ -1,0 +1,123 @@
+{
+  "methodology": "Synthetic labelled invoices from rag/evaluation/synthetic_invoices.py (6 variants: clean PNG, phone photo, low-res, text PDF, scanned PDF, skewed scan). Six fields per document (patient, hospital, amount, date, invoice number, category); exact match after normalisation; a missing field counts as wrong. Seeds 101 and 202 were never used while tuning (seed 7 was the development set). Local run: Tesseract on a 2-vCPU sandbox.",
+  "runs": {
+    "seed_101_single_pass": {
+      "documents": 60,
+      "field_checks": 360,
+      "overall_field_accuracy": 0.8972,
+      "documents_fully_correct": 42,
+      "per_field_accuracy": {
+        "patient_name": 0.9,
+        "hospital_name": 0.9167,
+        "amount": 0.9667,
+        "claim_date": 0.7833,
+        "invoice_number": 0.85,
+        "category": 0.9667
+      },
+      "per_variant_accuracy": {
+        "clean_png": 1.0,
+        "phone_photo": 0.8333,
+        "low_res": 1.0,
+        "text_pdf": 1.0,
+        "scanned_pdf": 0.9,
+        "skewed_scan": 0.65
+      },
+      "ocr_extraction_seconds": {
+        "mean": 0.532,
+        "median": 0.484,
+        "p95": 1.159,
+        "max": 1.798
+      }
+    },
+    "seed_101_multi_pass_vote": {
+      "documents": 60,
+      "field_checks": 360,
+      "overall_field_accuracy": 0.9611,
+      "documents_fully_correct": 50,
+      "per_field_accuracy": {
+        "patient_name": 0.9667,
+        "hospital_name": 0.95,
+        "amount": 0.9667,
+        "claim_date": 0.9667,
+        "invoice_number": 0.95,
+        "category": 0.9667
+      },
+      "per_variant_accuracy": {
+        "clean_png": 1.0,
+        "phone_photo": 0.9667,
+        "low_res": 1.0,
+        "text_pdf": 1.0,
+        "scanned_pdf": 0.9833,
+        "skewed_scan": 0.8167
+      },
+      "ocr_extraction_seconds": {
+        "mean": 1.081,
+        "median": 1.167,
+        "p95": 1.628,
+        "max": 2.2
+      }
+    },
+    "seed_202_single_pass": {
+      "documents": 60,
+      "field_checks": 360,
+      "overall_field_accuracy": 0.9083,
+      "documents_fully_correct": 44,
+      "per_field_accuracy": {
+        "patient_name": 0.8167,
+        "hospital_name": 0.9167,
+        "amount": 0.9667,
+        "claim_date": 0.9333,
+        "invoice_number": 0.9167,
+        "category": 0.9
+      },
+      "per_variant_accuracy": {
+        "clean_png": 1.0,
+        "phone_photo": 0.9,
+        "low_res": 1.0,
+        "text_pdf": 1.0,
+        "scanned_pdf": 0.9,
+        "skewed_scan": 0.65
+      },
+      "ocr_extraction_seconds": {
+        "mean": 0.477,
+        "median": 0.497,
+        "p95": 1.119,
+        "max": 1.146
+      }
+    },
+    "seed_202_multi_pass_vote": {
+      "documents": 60,
+      "field_checks": 360,
+      "overall_field_accuracy": 0.9583,
+      "documents_fully_correct": 52,
+      "per_field_accuracy": {
+        "patient_name": 0.9,
+        "hospital_name": 0.95,
+        "amount": 1.0,
+        "claim_date": 1.0,
+        "invoice_number": 0.95,
+        "category": 0.95
+      },
+      "per_variant_accuracy": {
+        "clean_png": 1.0,
+        "phone_photo": 0.9833,
+        "low_res": 1.0,
+        "text_pdf": 1.0,
+        "scanned_pdf": 0.9833,
+        "skewed_scan": 0.7833
+      },
+      "ocr_extraction_seconds": {
+        "mean": 1.022,
+        "median": 1.149,
+        "p95": 1.561,
+        "max": 1.773
+      }
+    }
+  },
+  "pooled": {
+    "documents": 120,
+    "field_checks": 720,
+    "single_pass_accuracy": 0.9028,
+    "multi_pass_accuracy": 0.9597
+  }
+}

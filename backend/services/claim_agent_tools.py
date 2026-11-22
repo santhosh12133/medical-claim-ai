@@ -10,12 +10,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from models import Claim
-from ocr.extract import extract_text
+from ocr.extract import extract_text, extract_text_candidates
 from rag.agent.core import AgentState, Tool, ToolRegistry
 from rag.decisions import BLOCKING_FLAGS
 from rag.services.taxonomy import get_taxonomy
 from services.claim_events import record_claim_event
-from services.claim_validation import extract_structured, structured_to_json, validate_claim_fields
+from services.claim_validation import extract_structured_multi, structured_to_json, validate_claim_fields
 from services.risk_checks import PriorClaim, assess_claim_risk
 
 
@@ -29,15 +29,21 @@ class ClaimAgentTools:
     def run_ocr(self, state: AgentState, args: dict) -> dict:
         with self.session_factory() as db:
             claim = db.get(Claim, state.claim_id)
-            text = extract_text(claim.file_path, enhanced=bool(args.get("enhanced")))
+            if args.get("enhanced"):
+                text = extract_text(claim.file_path, enhanced=True)
+                candidates = [text, *state.facts.get("ocr_candidates", [])]
+            else:
+                candidates = extract_text_candidates(claim.file_path)
+                text = candidates[0]
             claim.ocr_text = text
             db.commit()
         state.facts["ocr_text"] = text
+        state.facts["ocr_candidates"] = candidates
         state.facts["ocr_chars"] = len(text.strip())
         return {"chars": len(text.strip()), "enhanced": bool(args.get("enhanced"))}
 
     def extract_fields(self, state: AgentState, args: dict) -> dict:
-        structured = extract_structured(state.facts["ocr_text"])
+        structured = extract_structured_multi(state.facts.get("ocr_candidates") or [state.facts["ocr_text"]])
         fields = structured["fields"]
         with self.session_factory() as db:
             claim = db.get(Claim, state.claim_id)

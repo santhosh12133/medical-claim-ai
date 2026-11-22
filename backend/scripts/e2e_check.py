@@ -185,25 +185,36 @@ def scenario_uploads(client: httpx.Client, rng: random.Random) -> dict:
 
 
 # ----------------------------------------------------------------------------- processing
-def process_queue(worker, threads: int) -> dict:
+def process_queue(worker, threads: int, limit: int | None = None) -> dict:
+    """Process queued claims and time them. ``limit`` stops after that many claims (single-thread baseline)."""
     latencies: list[float] = []
+    stage_ms: dict[str, list[float]] = {}
 
     def one(claim_id: int) -> None:
         started = time.perf_counter()
-        worker.process_claim(claim_id)
+        state = worker.process_claim(claim_id)
         latencies.append(time.perf_counter() - started)
+        for record in getattr(state, "history", []) or []:
+            stage_ms.setdefault(record.tool, []).append(record.duration_ms)
 
     started = time.perf_counter()
     processed = 0
     with ThreadPoolExecutor(max_workers=threads) as pool:
-        while True:
-            batch = worker.claim_batch(threads * 2)
+        while limit is None or processed < limit:
+            size = threads * 2 if limit is None else min(threads * 2, limit - processed)
+            batch = worker.claim_batch(size)
             if not batch:
                 break
             list(pool.map(one, batch))
             processed += len(batch)
     elapsed = time.perf_counter() - started
+    total_stage = sum(sum(values) for values in stage_ms.values()) or 1.0
     return {
+        "stage_breakdown": {
+            tool: {"calls": len(values), "mean_ms": round(statistics.mean(values), 1),
+                   "share_of_tool_time": round(sum(values) / total_stage, 3)}
+            for tool, values in sorted(stage_ms.items(), key=lambda item: -sum(item[1]))
+        },
         "claims": processed,
         "threads": threads,
         "wall_seconds": round(elapsed, 2),
@@ -340,6 +351,8 @@ def main() -> int:  # noqa: C901 - linear script
 
     # ---- processing with the production worker (agent) ----------------------
     worker = ClaimWorker(max_attempts=3, auto_verify=True, use_agent=True)
+    # Single-thread baseline first (isolates per-claim cost from thread contention), then the concurrent run.
+    report["processing_single_thread"] = process_queue(worker, 1, limit=6)
     report["processing"] = process_queue(worker, args.worker_threads)
     per_minute = report["processing"]["throughput_claims_per_minute"] or 0
     report["processing"]["estimated_daily_capacity_single_worker"] = int(per_minute * 60 * 24)

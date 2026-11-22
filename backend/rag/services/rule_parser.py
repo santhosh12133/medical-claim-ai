@@ -235,10 +235,10 @@ class RuleParser:
 
     # -------------------------------------------------------------- internals
     def _classify(self, sentences, treatment, category, chunk_policy_type) -> list[_SentenceFacts]:
-        own_terms = set(self.taxonomy.synonyms(category)) if category else set()
+        category_terms = set(self.taxonomy.synonyms(category)) if category else set()
+        own_terms = set(category_terms)
         if treatment:
             own_terms.add(treatment.lower().strip())
-            own_terms.update(term for term in content_terms(treatment))
         other_terms = self.taxonomy.other_category_terms(category) - own_terms if category else set()
         on_topic = bool(category and normalize_policy_type(chunk_policy_type) == category)
         claim_terms = content_terms(treatment) if treatment else set()
@@ -246,13 +246,16 @@ class RuleParser:
         for sentence in sentences:
             mentions_treatment = any(contains_phrase(sentence, term) for term in own_terms)
             mentions_other = any(contains_phrase(sentence, term) for term in other_terms)
+            # A shared word only makes a sentence "about this claim" when the sentence is in scope:
+            # it names the claim's category or sits in a same-category policy. Otherwise a pharmacy
+            # clause ("vitamins without prescription are excluded") could apply to "prescription spectacles".
+            in_scope = category is None or on_topic or any(contains_phrase(sentence, term) for term in category_terms)
+            specific = in_scope and bool(claim_terms & content_terms(sentence))
             if not treatment and not category:
                 relevant = True
             else:
-                relevant = mentions_treatment or (on_topic and not mentions_other)
-            specific = bool(claim_terms & content_terms(sentence))
-            facts.append(_SentenceFacts(sentence, mentions_treatment or specific, mentions_other, relevant or specific,
-                                        specific))
+                relevant = mentions_treatment or specific or (on_topic and not mentions_other)
+            facts.append(_SentenceFacts(sentence, mentions_treatment or specific, mentions_other, relevant, specific))
         return facts
 
     def _select_limit(self, facts: list[_SentenceFacts]) -> tuple[_SentenceFacts | None, Decimal | None, bool]:

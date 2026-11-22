@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 import threading
 from functools import lru_cache
@@ -23,6 +24,9 @@ from PIL import Image, ImageFilter, ImageOps
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
+# Tesseract parallelises each page with OpenMP. When several worker threads OCR at once this
+# oversubscribes the CPU badly; one OpenMP thread per Tesseract process is the documented fix.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 _MIN_WIDTH = 1600
 _rapidocr_lock = threading.Lock()
 _ARTEFACTS = re.compile(r"^[‘’“”'`|_~]+", re.MULTILINE)
@@ -36,21 +40,22 @@ def _rapidocr_engine():  # pragma: no cover - optional dependency
 
 
 def estimate_skew(image: Image.Image, max_angle: float = 5.0, step: float = 0.5) -> float:
-    """Projection-profile deskew: the rotation that makes text rows sharpest (highest row-sum variance)."""
+    """Projection-profile deskew: the rotation that makes text rows sharpest (highest row-sum variance).
+
+    Row sums are computed with numpy; the previous per-row ``crop().getdata()`` loop held the GIL for
+    ~17k Python-level crops per call and serialised concurrent worker threads.
+    """
+    import numpy as np
+
     sample = image.convert("L")
     sample.thumbnail((800, 800))
     binary = sample.point(lambda value: 255 if value < 160 else 0)
     best_angle, best_score = 0.0, -1.0
-    angle = -max_angle
-    while angle <= max_angle + 1e-9:
-        rotated = binary.rotate(angle, resample=Image.NEAREST, fillcolor=0)
-        width = rotated.width
-        rows = [sum(rotated.crop((0, y, width, y + 1)).getdata()) for y in range(rotated.height)]
-        mean = sum(rows) / len(rows)
-        score = sum((row - mean) ** 2 for row in rows)
+    for angle in np.arange(-max_angle, max_angle + 1e-9, step):
+        rows = np.asarray(binary.rotate(float(angle), resample=Image.NEAREST, fillcolor=0), dtype=np.float64).sum(axis=1)
+        score = float(((rows - rows.mean()) ** 2).sum())
         if score > best_score:
-            best_angle, best_score = angle, score
-        angle += step
+            best_angle, best_score = float(angle), score
     return best_angle
 
 
@@ -151,6 +156,10 @@ def extract_text_from_image_bytes(data: bytes, enhanced: bool = False) -> str:
 def _extract_pdf_text(pdf_path: str | Path, enhanced: bool = False) -> str:
     """Extract embedded text from a PDF, OCR-ing page images when a page has no text layer."""
     reader = PdfReader(str(pdf_path))
+
+    def read_image(data: bytes) -> str:
+        return extract_text_from_image_bytes(data, enhanced)
+
     pages = []
     for page in reader.pages:
         try:
@@ -159,13 +168,72 @@ def _extract_pdf_text(pdf_path: str | Path, enhanced: bool = False) -> str:
             text = ""
         if not text.strip():
             try:
-                text = "\n".join(extract_text_from_image_bytes(image.data, enhanced) for image in page.images)
+                text = "\n".join(read_image(image.data) for image in page.images)
             except Exception:
                 logger.warning("Could not OCR images in scanned PDF page", exc_info=True)
                 text = ""
         if text.strip():
             pages.append(text.strip())
     return clean_ocr_text("\n\n".join(pages))
+
+
+# Preprocessing passes used for multi-pass OCR: (name, preprocess kwargs, tesseract page-segmentation mode).
+# psm 6 reads a single text block; psm 4 reads variable-size columns and recovers lines psm 6 drops on
+# noisy photos. A binarised pass was tried and removed: 3-100 s per page on noisy scans.
+OCR_PASSES = (
+    ("standard", {"despeckle": False}, 6),
+    ("despeckle", {"despeckle": True}, 6),
+    ("columns", {"despeckle": False}, 4),
+)
+
+
+def _tesseract_pass(image: Image.Image, options: dict, psm: int) -> str:
+    import pytesseract
+
+    return clean_ocr_text(pytesseract.image_to_string(preprocess_image(image, **options), config=f"--oem 3 --psm {psm}"))
+
+
+def _image_bytes_passes(data: bytes) -> list[str]:
+    with Image.open(io.BytesIO(data)) as image:
+        image.load()
+        return [_tesseract_pass(image, options, psm) for _, options, psm in OCR_PASSES]
+
+
+def _has_text_layer(path: Path) -> bool:
+    try:
+        return any((page.extract_text() or "").strip() for page in PdfReader(str(path)).pages)
+    except Exception:
+        return False
+
+
+def extract_text_candidates(file_path: str | Path) -> list[str]:
+    """Multi-pass OCR: one text per preprocessing pass (standard, despeckled, binarised).
+
+    Different passes misread different characters on noisy scans and phone photos; field extraction
+    votes across them (``services.claim_validation.extract_structured_multi``). Digital PDFs with a
+    text layer need no OCR and return a single candidate. Falls back to single-pass OCR when
+    Tesseract is unavailable.
+    """
+    path = Path(file_path)
+    try:
+        if path.suffix.lower() == ".pdf":
+            if _has_text_layer(path):
+                return [_extract_pdf_text(path)]
+            pages: list[list[str]] = [[] for _ in OCR_PASSES]
+            for page in PdfReader(str(path)).pages:
+                for embedded in page.images:
+                    for index, text in enumerate(_image_bytes_passes(embedded.data)):
+                        pages[index].append(text)
+            per_pass = [clean_ocr_text("\n\n".join(texts)) for texts in pages]
+        else:
+            with Image.open(path) as image:
+                image.load()
+                per_pass = [_tesseract_pass(image, options, psm) for _, options, psm in OCR_PASSES]
+    except Exception as exc:
+        logger.info("Multi-pass OCR unavailable (%s); using single pass", exc.__class__.__name__)
+        return [extract_text(path)]
+    candidates = [text for text in per_pass if text.strip()]
+    return candidates or [extract_text(path)]
 
 
 def extract_text(file_path: str | Path, enhanced: bool = False) -> str:

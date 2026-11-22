@@ -29,9 +29,9 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from ocr.extract import extract_text  # noqa: E402
+from ocr.extract import extract_text, extract_text_candidates  # noqa: E402
 from rag.evaluation.synthetic_invoices import generate_dataset  # noqa: E402
-from services.claim_validation import extract_structured  # noqa: E402
+from services.claim_validation import extract_structured, extract_structured_multi  # noqa: E402
 from services.risk_checks import normalise_name  # noqa: E402
 
 FIELDS = ("patient_name", "hospital_name", "amount", "claim_date", "invoice_number", "category")
@@ -53,15 +53,17 @@ def compare(truth, fields: dict) -> dict[str, bool]:
     }
 
 
-def run(count: int, seed: int, workdir: Path) -> dict:
+def run(count: int, seed: int, workdir: Path, single_pass: bool = False) -> dict:
     truths = generate_dataset(count, workdir, seed)
     per_field = defaultdict(list)
     per_variant = defaultdict(list)
     timings, failures = [], []
     for truth in truths:
         started = time.perf_counter()
-        text = extract_text(workdir / truth.filename)
-        fields = extract_structured(text)["fields"]
+        if single_pass:
+            fields = extract_structured(extract_text(workdir / truth.filename))["fields"]
+        else:  # production path: multi-pass OCR with per-field voting
+            fields = extract_structured_multi(extract_text_candidates(workdir / truth.filename))["fields"]
         timings.append(time.perf_counter() - started)
         result = compare(truth, fields)
         for name, ok in result.items():
@@ -101,11 +103,13 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--keep", help="Directory to keep the generated documents in")
     parser.add_argument("--json", dest="json_path")
+    parser.add_argument("--single-pass", action="store_true", help="Legacy single-pass OCR (for before/after comparison)")
     parser.add_argument("--min-accuracy", type=float, default=None, help="Fail below this overall field accuracy")
     args = parser.parse_args()
 
     workdir = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="ocr-bench-"))
-    report = run(args.count, args.seed, workdir)
+    report = run(args.count, args.seed, workdir, single_pass=args.single_pass)
+    report["ocr_mode"] = "single-pass" if args.single_pass else "multi-pass vote"
     print(json.dumps({key: value for key, value in report.items() if key != "failures"}, indent=2))
     print(f"{len(report['failures'])} documents had at least one wrong field")
     if args.json_path:

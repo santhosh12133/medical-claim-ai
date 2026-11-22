@@ -111,10 +111,12 @@ jobs:
         run: python scripts/e2e_check.py --claims 36 --report e2e_report.json
 
       - name: RAG evaluation with dense + BM25 retrieval
-        run: python scripts/evaluate_rag.py --embeddings --json rag_eval_hybrid.json
+        run: python scripts/evaluate_rag.py --embeddings --json rag_eval_hybrid.json --min-decision-accuracy 0.95 --max-unsafe-rate 0
 
       - name: OCR extraction accuracy (held-out synthetic set)
-        run: python scripts/benchmark_extraction.py --count 120 --seed 7 --json extraction_report.json
+        run: |
+          python scripts/benchmark_extraction.py --count 120 --seed 101 --json extraction_report.json
+          python scripts/benchmark_extraction.py --single-pass --count 120 --seed 101 --json extraction_report_single_pass.json
 
       - name: Upload reports
         if: always()
@@ -125,6 +127,7 @@ jobs:
             backend/e2e_report.json
             backend/rag_eval_hybrid.json
             backend/extraction_report.json
+            backend/extraction_report_single_pass.json
             backend/api.log
             backend/logs/
 

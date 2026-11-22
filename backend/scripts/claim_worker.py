@@ -130,14 +130,12 @@ class ClaimWorker:
             return ids
 
     # ------------------------------------------------------------ processing
-    def process_claim(self, claim_id: int) -> None:
+    def process_claim(self, claim_id: int) -> AgentState | None:
         if self.use_agent:
-            self._run_agent(claim_id)
-            return
-        if not self._extract_and_validate(claim_id):
-            return
-        if self.auto_verify:
+            return self._run_agent(claim_id)
+        if self._extract_and_validate(claim_id) and self.auto_verify:
             self._verify(claim_id)
+        return None
 
     def _run_agent(self, claim_id: int) -> AgentState:
         """Agentic path: the planner chooses OCR/extraction/risk/verification/escalation steps from intermediate results."""

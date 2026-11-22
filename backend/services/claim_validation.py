@@ -13,13 +13,13 @@ _AMOUNT_LABELS = (
 )
 AMOUNT_PATTERN = re.compile(
     rf"\b(?P<label>{_AMOUNT_LABELS})\b\s*(?:\(\s*(?:rs\.?|inr|{RUPEE_SYMBOL})\s*\))?[:\s\-]*"
-    rf"(?:{RUPEE_SYMBOL}|rs\.?|inr)?\s*(?P<value>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)",
+    rf"(?:{RUPEE_SYMBOL}|rs[.:]?|inr)?\s*(?P<value>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)",
     re.IGNORECASE,
 )
 _LABEL_PRIORITY = ("net payable", "amount payable", "total payable", "grand total", "net amount", "bill amount",
                    "total amount", "amount due", "balance due", "total", "amount")
 PATIENT_PATTERN = re.compile(
-    r"(?:patient(?:'s)?\s*name|patient|name\s+of\s+(?:the\s+)?patient)\s*[:\-]?\s*"
+    r"(?:patient(?:'s)?\s*name|patient|name\s+of\s+(?:the\s+)?patient)\s*[:;\-]?\s*"
     r"((?:(?:mr|mrs|ms|dr|shri|smt)\.?\s+)?[A-Za-z][A-Za-z .]{1,60}?)"
     r"(?=\s{2,}|\s*\b(?:age|sex|gender|uhid|mrn|ip|op|id|date)\b|\s+[^A-Za-z\s]|[^A-Za-z .\n]|\s*\n|\s*$)",
     re.IGNORECASE | re.MULTILINE,
@@ -33,7 +33,7 @@ HOSPITAL_PATTERN = re.compile(
 )
 _DATE_LABEL = r"(?:bill\s+date|invoice\s+date|date\s+of\s+(?:service|treatment|discharge|bill)|discharge\s+date|date)"
 DATE_PATTERN = re.compile(
-    rf"{_DATE_LABEL}\s*[:\-]?\s*("
+    rf"{_DATE_LABEL}\s*[:;\-]?\s*("
     r"[0-9]{1,2}[-/.][0-9]{1,2}[-/.](?:[0-9]{4}|[0-9]{2})"
     r"|[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}"
     r"|[0-9]{1,2}[\s\-]+[A-Za-z]{3,9}[\s\-,]+[0-9]{4}"
@@ -41,7 +41,7 @@ DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 INVOICE_PATTERN = re.compile(
-    r"(?:invoice|bill|receipt)\s*(?:no|number|#)\.?\s*[:\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,30})", re.IGNORECASE
+    r"(?:invoice|bill|receipt)\s*(?:no|number|#)\.?\s*[:;\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,30})", re.IGNORECASE
 )
 _TRAILING_JUNK = re.compile(r"(?:\s+(?:[a-z]\.?|[^A-Za-z\s]+))+$")
 TREATMENT_PATTERN = re.compile(
@@ -272,6 +272,44 @@ def extract_structured(text: str) -> Dict[str, Any]:
         "warnings": warnings,
         "text_length": len(text.strip()),
     }
+
+
+_VOTED_FIELDS = ("patient_name", "hospital_name", "treatment", "policy_category", "amount", "claim_date", "invoice_number")
+
+
+def _vote_key(value: Any) -> str:
+    return " ".join(str(value).lower().split())
+
+
+def extract_structured_multi(texts: list[str]) -> Dict[str, Any]:
+    """Extract from several OCR passes of the same document and vote per field.
+
+    A value read identically by more passes wins; ties go to the earliest (standard) pass. A field
+    found by only one pass is still used, so a pass that misses a line does not lose the field.
+    """
+    texts = [text for text in texts if text and text.strip()] or [""]
+    results = [extract_structured(text) for text in texts]
+    if len(results) == 1:
+        results[0]["ocr_passes"] = 1
+        return results[0]
+    base = max(results, key=lambda result: sum(1 for value in result["fields"].values() if value is not None))
+    merged = {**base, "fields": dict(base["fields"]), "confidence": dict(base["confidence"])}
+    agreement: dict[str, float] = {}
+    for name in _VOTED_FIELDS:
+        candidates = [(index, result["fields"].get(name)) for index, result in enumerate(results)
+                      if result["fields"].get(name) is not None]
+        if not candidates:
+            continue
+        votes: dict[str, list[int]] = {}
+        for index, value in candidates:
+            votes.setdefault(_vote_key(value), []).append(index)
+        winner = max(votes.values(), key=lambda indexes: (len(indexes), -indexes[0]))
+        merged["fields"][name] = results[winner[0]]["fields"][name]
+        merged["confidence"][name] = results[winner[0]]["confidence"].get(name, 0.0)
+        agreement[name] = round(len(winner) / len(results), 3)
+    merged["field_agreement"] = agreement
+    merged["ocr_passes"] = len(results)
+    return merged
 
 
 def structured_to_json(structured: Dict[str, Any]) -> Dict[str, Any]:

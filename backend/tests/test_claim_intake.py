@@ -160,3 +160,27 @@ def test_declared_amount_mismatch_is_flagged():
                               amount=Decimal("8250"), claim_date=date(2026, 1, 1), today=date(2026, 2, 1),
                               prior_claims=[], declared_amount=Decimal("8250.50"))
     assert "AMOUNT_MISMATCH" not in close.flags
+
+
+def test_multi_pass_voting_recovers_fields_missed_or_misread_by_one_pass():
+    from services.claim_validation import extract_structured_multi
+
+    standard = "Green Valley Hospital\nReceipt No: RC-12827\nDate: 23/07/2028\nNet Payable: Rs. 66,720.00"
+    despeckled = ("Green Valley Hospital\nReceipt No: RC-12827\nDate: 23/07/2026\nPatient; Santhosh Kumar\n"
+                  "Net Payable: Rs:66,720.00")
+    columns = "Green Valley Hospital\nDate: 23/07/2026\nPatient: Santhosh Kumar\nTreatment: MRI scan"
+    result = extract_structured_multi([standard, despeckled, columns])
+    fields = result["fields"]
+    assert fields["claim_date"] == date(2026, 7, 23)      # 2 of 3 passes agree; the 2028 misread loses
+    assert fields["patient_name"] == "Santhosh Kumar"     # missing from the first pass, found by others
+    assert fields["amount"] == 66720.0                     # "Rs:" separator tolerated
+    assert fields["invoice_number"] == "RC-12827"
+    assert result["ocr_passes"] == 3
+    assert result["field_agreement"]["claim_date"] == round(2 / 3, 3)
+
+
+def test_single_candidate_behaves_like_single_pass():
+    from services.claim_validation import extract_structured, extract_structured_multi
+
+    text = "Apollo Hospital\nPatient Santhosh\nAmount 12500\nDate: 12-01-2026"
+    assert extract_structured_multi([text])["fields"] == extract_structured(text)["fields"]

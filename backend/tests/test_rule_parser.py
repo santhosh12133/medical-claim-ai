@@ -97,3 +97,15 @@ def test_rupee_symbol_k_suffix_and_indian_grouping():
     assert parser.parse("Maximum of ₹2,00,000 per year.").limit_amount == Decimal("200000")
     assert parser.parse("Wellness allowance capped at Rs 15k per year.").limit_amount == Decimal("15000")
     assert parser.parse("Within 2 years Rs nothing").__class__.__name__ in {"NoneType"}
+
+
+def test_exclusion_from_another_policy_does_not_apply_through_a_shared_word():
+    # Regression (found by the CI hybrid evaluation): "Prescription spectacles" was rejected because a
+    # pharmacy clause about vitamins without prescription shares the word "prescription".
+    parser = RuleParser()
+    pharmacy = "Prescription medicines are reimbursable up to Rs. 10,000 per year. Vitamins without prescription are excluded."
+    rule = parser.extract(pharmacy, treatment="Prescription spectacles", chunk_policy_type="Pharmacy")
+    assert rule is None or rule.matched_exclusion is None
+    vision = "Eye examinations and spectacles are reimbursable up to Rs. 10,000 per year. Cosmetic eyewear is excluded."
+    assert parser.extract(vision, treatment="Prescription spectacles", chunk_policy_type="Vision").matched_exclusion is None
+    assert parser.extract(vision, treatment="Cosmetic eyewear", chunk_policy_type="Vision").matched_exclusion is not None

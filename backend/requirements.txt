@@ -11,6 +11,7 @@ chromadb
 sentence-transformers
 pypdf
 pydantic-settings
+numpy
 pillow
 python-dotenv
 openai
