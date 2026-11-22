@@ -1,6 +1,10 @@
 from sqlalchemy import JSON, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 
 from database import Base
+# Claims reference users.id (user_id, reviewed_by). Import the User model here so the "users" table is
+# registered in every process that imports Claim; the worker container never imports it otherwise and
+# crashed on its first flush with NoReferencedTableError.
+import models_user  # noqa: E402,F401
 
 
 class Claim(Base):
