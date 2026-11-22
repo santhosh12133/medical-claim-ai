@@ -15,7 +15,8 @@ software works and can be re-measured; they are not evidence about real insuranc
 | CI-B | Full CI after the fixes, on `main` (commit `f4703d3`) | GitHub Actions run 44994780451 |
 | CI-C | CI on `main` with mismatch printing (commit `ad48677`) | GitHub Actions run 44995584324 |
 | CI-D | CI on `main` after the OCR-disagreement fix (commit `4963b1c`) | GitHub Actions run 44996510175 |
-| CI-E | **Pre-deployment run**: all of the above + docker compose stack, browser test, security scans (commit `404a787`) | GitHub Actions run 45003862126 |
+| CI-E | Pre-deployment run: all of the above + docker compose stack, browser test, security scans (commit `404a787`) | GitHub Actions run 45003862126 |
+| CI-F | **Latest**: remaining issues fixed (React Router v7, Node 24 actions, 4-pass OCR) (commit `315170f`) | GitHub Actions run 45006678799 |
 | LOCAL | Audit sandbox (2 vCPU, Tesseract, no FastAPI/SQLAlchemy/torch installable) | commands in each section |
 
 CI runs: lint (flake8), unit + API integration tests on Python 3.10/3.11/3.12, the frontend production build
@@ -135,12 +136,16 @@ normalisation. A missing field counts as wrong. Seed 7 was used while tuning; se
 
 | Run | Documents | Field checks | Single-pass | Multi-pass vote (production) |
 | --- | --- | --- | --- | --- |
-| LOCAL, held-out seeds 101 + 202 | 120 | 720 | 90.3% | **96.0%** |
-| CI-D, held-out seed 101 (different Tesseract build) | 120 | 720 | 87.9% | **94.7%** |
+| LOCAL, held-out seeds 101 + 202 (3 passes, CI-D code) | 120 | 720 | 90.3% | 96.0% |
+| LOCAL, held-out seeds 101 + 202 (**4 passes + line-item amount vote, current**) | 120 | 720 | 90.3% | **97.5%** |
+| CI-D, held-out seed 101 (different Tesseract build, 3 passes) | 120 | 720 | 87.9% | 94.7% |
+| CI-F, held-out seed 101 (different Tesseract build, **current**) | 120 | 720 | 87.9% | **97.4%** |
 | Baseline extractor (earlier run, 4 fields, seed 7) | 120 | 480 | 38.3% | — |
 
 Per-variant accuracy (LOCAL multi-pass, seeds 101/202): clean PNG 100/100%, low-res 100/100%, text PDF
-100/100%, phone photo 96.7/98.3%, scanned PDF 98.3/98.3%, **skewed scan 81.7/78.3%**.
+100/100%, phone photo, scanned PDF and **skewed scan 88.3/86.7%** (81.7/78.3% with three passes). The fourth
+pass (despeckled, column mode) and preferring amounts that match the bill's line-item total fixed most skewed-scan
+errors (for example 43,530.00 misread as 4353000).
 Raw results: `backend/eval/extraction_heldout_seeds_101_202.json`.
 
 OCR cost: about 1.0 s per document for three passes (0.5 s single-pass) on LOCAL. Invalid-document
@@ -304,10 +309,11 @@ system's behaviour with `AUTO_DECISION_ENABLED=false`).
 | Measurement | Auto-finalised without a human | Wrong auto-decisions |
 | --- | --- | --- |
 | End-to-end CI-B (before fix #19) | 63.9% (23/36) | 1 |
-| **End-to-end CI-D (final)** | **47.2% (17/36)** | **0** |
+| End-to-end CI-D (OCR-disagreement fix) | 47.2% (17/36) | 0 |
+| **End-to-end CI-F (current, 4-pass OCR)** | **52.8% (19/36)** | **0** |
 | Offline golden set (32 claims) | 90.6% | 0 |
 
-**80% is not verified.** The final end-to-end measurement is 47%, and none of these numbers come from
+**80% is not verified.** The latest end-to-end measurement is 52.8% (CI-F), and none of these numbers come from
 real claims. The rate depends on `AUTO_DECISION_MIN_CONFIDENCE` and on OCR quality: most escalations in
 CI-D are skewed or noisy scans where passes disagreed, plus deliberate risk scenarios.
 
@@ -331,11 +337,15 @@ Remaining (from `docs/security-threat-model.md` and this audit):
    `benchmark_extraction.py` and `evaluate_rag.py` before quoting any figure externally.
 2. **No live LLM test.** The LLM adjudicator, LLM Q&A and LLM planner have not been exercised with a valid key.
 3. **Rule-based NLP.** It works for the bill layouts it was written for; unseen layouts will degrade.
-4. **Skewed scans** are the weakest OCR variant (~80% field accuracy).
+4. **Skewed scans** are the weakest OCR variant (~87.5% field accuracy on held-out synthetic scans).
 5. **Small retrieval corpus.** Hybrid search was only evaluated on 25 one-page policies.
 6. **Single-node design.** Database-backed queue, in-process BM25 index and rate limiter.
 
 ## 18. Pre-deployment verification (deployment artefacts)
+
+> Re-run on the latest commit (CI-F, run 45006678799): all 7 jobs pass — 32/32 smoke checks, 2/2 persistence,
+> 10/10 browser steps, 118 tests, `npm audit` 0 vulnerabilities, pip-audit clean apart from the documented
+> Chroma-server advisories.
 
 Run on 2026-11-22 against the **actual deployment artefacts**: the two Dockerfiles and
 `docker-compose.yml`, built and started exactly as an operator would. CI job "Deployment stack",
@@ -368,8 +378,8 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 - **chromadb 1.5.9, 4 advisories in the Chroma HTTP server** (no fixed release exists). Not reachable: the app
   embeds Chroma in-process and never runs a Chroma server. Details and the deployment rule are in
   `backend/security/accepted-vulnerabilities.md`. Any *other* Python advisory fails CI.
-- **react-router 6.x, 2 moderate advisories**: the fix requires the breaking v7 upgrade. The CI gate is
-  high+; schedule the v7 migration.
+- ~~react-router 6.x, 2 moderate advisories~~: **resolved** by upgrading to react-router-dom 7 (CI-F;
+  `npm audit` reports 0 vulnerabilities; the browser test passes on v7).
 
 ### Before a real (non-demo) deployment
 
@@ -390,23 +400,23 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 | Resume claim | Implementation found | Tested | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | Python + FastAPI | FastAPI app, 29 endpoints, Pydantic validation, Swagger UI | Yes | 117 tests on 3 Python versions; live server in CI end-to-end (§12) | **VERIFIED** |
-| OCR | Tesseract + preprocessing + multi-pass voting; RapidOCR fallback; scanned-PDF OCR | Yes | 96.0% / 94.7% field accuracy on held-out synthetic bills (§6) | **VERIFIED** (synthetic data) |
+| OCR | Tesseract + preprocessing + multi-pass voting; RapidOCR fallback; scanned-PDF OCR | Yes | 97.5% / 97.4% field accuracy on held-out synthetic bills (§6) | **VERIFIED** (synthetic data) |
 | NLP | Rule-based field, line-item and entity extraction to JSON | Yes | Unit tests; benchmark (§6–7) | **PARTIALLY IMPLEMENTED**: rule-based, no trained NLP model |
 | GPT / LLM | OpenAI/Anthropic providers, grounded prompts, citation checks, safe fallback | Failure path only | Invalid-key outage handled in CI (§8) | **NOT TESTED** against a live model |
 | RAG | Ingestion → chunking → embeddings → Chroma → hybrid retrieval → citations → policy validation | Yes | Golden set 32/32 with real embeddings; CI end-to-end (§9) | **VERIFIED** for retrieval and validation; LLM answer generation not live-tested |
 | Semantic Search | MiniLM embeddings + cosine search in Chroma (+ BM25 fusion) | Yes | Hit@1 = 1.0 in CI with real embeddings (§10) | **VERIFIED** (small synthetic corpus) |
 | Agentic AI | Planner + tool registry + stateful multi-step loop, retries, human escalation | Yes (rule planner); LLM planner scripted only | 10 agent tests; agent trace on every CI claim (§11) | **PARTIALLY IMPLEMENTED**: tool-using workflow verified; LLM-driven planning not live-tested |
 | 250+ claims/day | Async worker, measured throughput | Capacity only | 24–132 claims/min on CI runners (§15) | **PARTIALLY IMPLEMENTED**: capacity far exceeds 250/day; real daily volume never observed |
-| 90% extraction accuracy | Benchmark harness with labelled data | Yes | 96.0% local, 94.7% CI on held-out *synthetic* bills (§6) | **PARTIALLY IMPLEMENTED**: met on synthetic data, not measured on real documents |
-| 80% manual review reduction | Auto-decision engine + metrics | Yes | 47.2% end-to-end with 0 wrong decisions; 90.6% on golden set (§15) | **NOT VERIFIED**: 47% measured end to end; not measured on real claims |
+| 90% extraction accuracy | Benchmark harness with labelled data | Yes | 97.5% local, 97.4% CI on held-out *synthetic* bills (§6) | **PARTIALLY IMPLEMENTED**: met on synthetic data, not measured on real documents |
+| 80% manual review reduction | Auto-decision engine + metrics | Yes | 52.8% end-to-end with 0 wrong decisions; 90.6% on golden set (§15) | **NOT VERIFIED**: 53% measured end to end; not measured on real claims |
 
 ### Suggested accurate resume wording
 
 > Built a FastAPI claims-automation platform (Python, Tesseract OCR, rule-based NLP, hybrid RAG with
 > sentence-transformer embeddings + BM25 over ChromaDB, optional GPT/Claude adjudication) with a tool-using
-> claim agent and human-in-the-loop escalation; on held-out synthetic test sets it reached ~95% field
-> extraction accuracy and auto-resolved ~47% of claims with zero wrong automatic decisions, at a CI-measured
-> throughput of 24+ claims/minute per worker thread.
+> claim agent and human-in-the-loop escalation; on held-out synthetic test sets it reached ~97% field
+> extraction accuracy and auto-resolved ~50% of claims with zero wrong automatic decisions, at a CI-measured
+> throughput of 20+ claims/minute per worker thread.
 
 ### Reproduce
 

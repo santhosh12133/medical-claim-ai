@@ -129,10 +129,10 @@ flowchart LR
 
 | Area | Result | Evidence |
 | --- | --- | --- |
-| Field extraction (OCR + NLP) | **96.0%** field accuracy on 120 held-out synthetic invoices (720 field checks); 90.3% with single-pass OCR | `python scripts/benchmark_extraction.py --seed 101` / `--seed 202`; `backend/eval/extraction_heldout_seeds_101_202.json` |
+| Field extraction (OCR + NLP) | **97.5%** field accuracy on 120 held-out synthetic invoices (720 field checks); 90.3% with single-pass OCR | `python scripts/benchmark_extraction.py --seed 101` / `--seed 202`; `backend/eval/extraction_heldout_seeds_101_202.json` |
 | Policy retrieval | hit-rate@1 = 1.0 on 32 labelled claims (BM25-only and hybrid) | `python scripts/evaluate_rag.py [--embeddings]` |
 | Policy decisions | 32/32 correct offline; original pipeline 1/32 (no policy retrieved for 30) | `python scripts/evaluate_rag.py`; [`docs/rag-pipeline.md`](docs/rag-pipeline.md) |
-| End-to-end | PostgreSQL + API + worker + real embeddings: 12/12 failure scenarios pass; 17/36 synthetic claims auto-finalised, 0 wrong; 24–132 claims/min | CI job "End-to-end"; `scripts/e2e_check.py` |
+| End-to-end | PostgreSQL + API + worker + real embeddings: 12/12 failure scenarios pass; 19/36 synthetic claims auto-finalised, 0 wrong; 20–132 claims/min | CI job "End-to-end"; `scripts/e2e_check.py` |
 
 | Deployment stack | `docker compose` build + up, 32/32 smoke checks, restart persistence, 10/10 Chromium browser steps, full migration rollback, security scans | CI job "Deployment stack"; `scripts/stack_smoke_test.py`, `scripts/browser_e2e.py`; [audit §18](PROJECT_AUDIT_REPORT.md) |
 
@@ -156,7 +156,7 @@ coverage questions on the **Coverage Assistant** page.
 ### Known limitations
 
 - Extraction and decision datasets are synthetic; no real (anonymised) bills or insurer policies were evaluated.
-- Field extraction is rule-based NLP (regular expressions + taxonomy), not a trained NER model; skewed scans remain the weakest variant (~80%).
+- Field extraction is rule-based NLP (regular expressions + taxonomy), not a trained NER model; skewed scans remain the weakest variant (~87.5%).
 - The LLM integration (OpenAI/Anthropic) was verified only for graceful failure; no real API key was available, so LLM answers, LLM planning and LLM adjudication are untested against a live model.
 - The production agent uses the deterministic `RulePlanner`; the `LLMPlanner` is implemented and unit-tested with a scripted model only.
 - Throughput was measured on a shared CI runner; real capacity depends on hardware, document mix and worker count.
