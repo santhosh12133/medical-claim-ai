@@ -27,8 +27,8 @@ cat <<INFO
  Logins (generated for this codespace):
 $(sudo sed 's/^/   /' /root/medical-claim-ai-credentials.txt)
 
- Automatic decisions: $(grep -q '^AUTO_DECISION_ENABLED=true' .env && echo "ON (clean claims approved; flagged ones go to admin review)" || echo "OFF")
- GPT/Claude check:    $(grep -q '^GPT_DECISION_ENABLED=true' .env && echo "ON" || echo "OFF (add an OPENAI_API_KEY Codespaces secret to switch it on)")
+ Automatic decisions: $(sudo grep -q '^AUTO_DECISION_ENABLED=true' .env && echo "ON (clean claims approved; flagged ones go to admin review)" || echo "OFF")
+ GPT/Claude check:    $(sudo grep -q '^GPT_DECISION_ENABLED=true' .env && echo "ON" || echo "OFF (add an OPENAI_API_KEY Codespaces secret to switch it on)")
 
  To share the link: open the PORTS tab, right-click port 80,
  choose "Port Visibility" -> "Public".

@@ -403,7 +403,7 @@ jobs:
           python3 -c "import json; json.load(open('.devcontainer/devcontainer.json'))"
           bash .devcontainer/start.sh | tee codespace.log
           grep -q "running at:  https://ci-demo-80.app.github.dev" codespace.log
-          grep -q "Automatic decisions: ON" codespace.log || fail "auto decisions not on"; echo "[PASS] auto decisions on"
+          grep -q "Automatic decisions: ON (clean claims approved" codespace.log || fail "summary does not show auto decisions on"; echo "[PASS] auto decisions on"
           grep -q "GPT/Claude check:    ON" codespace.log || fail "GPT not switched on"; echo "[PASS] GPT switched on from the secret"
           [ "$(sudo $COMPOSE exec -T api printenv AUTO_DECISION_ENABLED)" = true ] || fail "API container not in auto mode"
           [ "$(sudo $COMPOSE exec -T worker printenv GPT_DECISION_ENABLED)" = true ] || fail "worker has GPT off"
