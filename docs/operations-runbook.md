@@ -40,7 +40,7 @@ Validate that:
 
 Check:
 
-- ChromaDB persistence path
+- vector backend (`RAG_VECTOR_BACKEND`; ChromaDB path only for `chroma`)
 - Sentence Transformer model availability
 - policy index contents
 - policy lifecycle status

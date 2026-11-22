@@ -14,7 +14,7 @@ This document connects a product requirement to its implementation, validation m
 | TR-06 | Bounded retries | worker attempt state | Failure-injection test |
 | TR-07 | Policy document lifecycle | policy repository/model/routes | Lifecycle API tests |
 | TR-08 | Duplicate policy detection | SHA-256 fingerprinting | Duplicate-ingestion test |
-| TR-09 | Semantic policy retrieval | Chroma vector repository + retrieval service | Retrieval evaluation |
+| TR-09 | Semantic policy retrieval | SQL vector repository (optional Chroma) + retrieval service | Retrieval evaluation |
 | TR-10 | Deterministic reimbursement baseline | rule parser + verification service | Golden decision tests |
 | TR-11 | GPT evidence restriction | GPT decision service | Prompt/response validation tests |
 | TR-12 | Autonomous confidence gate | decision engine | Decision-engine tests |

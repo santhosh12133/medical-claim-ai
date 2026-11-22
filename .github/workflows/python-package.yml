@@ -144,6 +144,9 @@ jobs:
       GPT_DECISION_MODEL: ${{ vars.GPT_DECISION_MODEL }}  # optional repository variable; empty = default model
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Report whether a key is configured
         id: key
         run: |
@@ -153,10 +156,6 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Live LLM check skipped::Add OPENAI_API_KEY or ANTHROPIC_API_KEY under Settings > Secrets and variables > Actions to run it."
           fi
-
-      - name: Checkout
-        if: steps.key.outputs.present == 'true'
-        uses: actions/checkout@v5
 
       - name: Set up Python
         if: steps.key.outputs.present == 'true'

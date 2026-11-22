@@ -61,7 +61,7 @@ The OCR layer uses the configured OCR engines to extract text from supported ima
 
 ### RAG
 
-Policy PDFs are parsed with `pypdf`, chunked, embedded using Sentence Transformers, and indexed in ChromaDB. PostgreSQL stores policy metadata and chunk records.
+Policy PDFs are parsed with `pypdf`, chunked, embedded using Sentence Transformers, and stored with the chunk records in PostgreSQL, which also holds policy metadata. Each process searches the embeddings with an exact in-memory cosine index (ChromaDB is an optional backend).
 
 Claim verification retrieves policy evidence using semantic similarity plus available treatment, policy type, and department metadata. Similarity thresholds prevent weak evidence from being treated as reliable policy evidence.
 
@@ -98,8 +98,8 @@ The GPT layer cannot invent policy evidence or increase the deterministic approv
 | Claims | PostgreSQL |
 | Claim status/events | PostgreSQL |
 | Policy metadata | PostgreSQL |
-| Policy chunks | PostgreSQL + ChromaDB index |
-| Vector search | ChromaDB |
+| Policy chunks | PostgreSQL (text + embeddings) |
+| Vector search | In-process exact cosine index (ChromaDB optional) |
 | Verification audit | PostgreSQL |
 | Uploaded documents | Persistent filesystem/object storage |
 
@@ -154,7 +154,7 @@ API and worker containers scale independently.
 - Keep PostgreSQL connection limits aligned with API/worker replica count.
 - Move document storage to object storage when multiple hosts must access uploads.
 - Move the queue to Redis/RQ/Celery when database polling becomes a bottleneck.
-- Move ChromaDB to a managed or separately hosted vector service if vector workload outgrows the application host.
+- Move vector search to pgvector or a managed vector service if the policy corpus outgrows in-process exact search (ADR-012).
 
 ## Failure Boundaries
 

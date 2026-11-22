@@ -107,9 +107,18 @@ class SqlPolicyVectorRepository:
 
     # ------------------------------------------------------------------ reads
     def _probe(self, db) -> tuple:
+        """Cheap fingerprint of everything the index depends on.
+
+        ``updated_at`` catches metadata edits, but timestamps can be too coarse (SQLite stores whole seconds), so
+        status changes, the ones that matter most for retrieval, are also caught by a per-status sum of document
+        ids, which changes whenever any document moves from one status to another.
+        """
         chunks = db.query(func.count(PolicyChunk.id), func.max(PolicyChunk.id)).one()
         documents = db.query(func.count(PolicyDocument.id), func.max(PolicyDocument.updated_at)).one()
-        return (int(chunks[0] or 0), chunks[1], int(documents[0] or 0), str(documents[1]))
+        statuses = db.query(PolicyDocument.status, func.count(PolicyDocument.id), func.sum(PolicyDocument.id)).group_by(
+            PolicyDocument.status).order_by(PolicyDocument.status).all()
+        return (int(chunks[0] or 0), chunks[1], int(documents[0] or 0), str(documents[1]),
+                tuple((status, int(count), int(total or 0)) for status, count, total in statuses))
 
     def _snapshot(self) -> DenseIndex:
         with self._lock:

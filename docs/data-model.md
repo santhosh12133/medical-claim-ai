@@ -4,7 +4,7 @@
 
 PostgreSQL is the transactional source of truth. SQLAlchemy maps application models and Alembic provides versioned schema migrations.
 
-Vector retrieval is implemented with ChromaDB. ChromaDB is treated as a search index; relational metadata and audit state remain authoritative in PostgreSQL.
+Policy embeddings are stored in `policy_chunks.embedding` (float32 bytes, migration 0010) and searched by an in-process exact cosine index. Relational metadata and audit state are authoritative in PostgreSQL; the optional ChromaDB backend (`RAG_VECTOR_BACKEND=chroma`) is treated as a rebuildable search index.
 
 ## 2. Core Entities
 

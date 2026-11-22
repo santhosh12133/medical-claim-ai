@@ -16,7 +16,7 @@ Reverse proxy / platform HTTPS
           |
           +--> PostgreSQL
           +--> persistent claim/policy storage
-          +--> ChromaDB
+          +--> (embeddings stored in PostgreSQL)
           +--> Claim Worker(s)
                     |
                     +--> OCR
@@ -35,7 +35,7 @@ The current queue is PostgreSQL-backed. It uses row-level locking with `SKIP LOC
 - One or more claim-worker containers
 - Managed PostgreSQL database
 - Persistent storage for uploaded claims and policy documents
-- Persistent ChromaDB storage if Chroma remains self-hosted
+- Persistent ChromaDB storage only if `RAG_VECTOR_BACKEND=chroma` is chosen (default `sql` needs none)
 - HTTPS termination
 
 ## 3. Environment Variables
@@ -49,7 +49,7 @@ Required values include:
 - `CORS_ORIGINS` (only the production frontend origin)
 - `UPLOAD_DIR`
 - `RAG_UPLOAD_DIR`
-- `RAG_CHROMA_PATH`
+- `RAG_VECTOR_BACKEND` (`sql` default; `RAG_CHROMA_PATH` only for `chroma`)
 - `OPENAI_API_KEY` only when GPT assessment is enabled
 
 Do not commit `.env`, API keys, database passwords, uploaded documents, Chroma data, or generated logs.
@@ -143,7 +143,7 @@ PostgreSQL is the source of truth for claims, users, policies, and verification 
 
 Uploaded files and policy documents must use persistent storage. Container-local files are not durable across container replacement unless backed by a volume or object-storage integration.
 
-ChromaDB must also use persistent storage. If the vector index is lost, policies can be re-ingested from the authoritative policy documents.
+With the default `sql` vector backend the embeddings are part of the PostgreSQL backup. With the optional `chroma` backend, Chroma needs persistent storage; if it is lost, run `scripts/reindex_policies.py`.
 
 ## 10. Deployment Checklist
 

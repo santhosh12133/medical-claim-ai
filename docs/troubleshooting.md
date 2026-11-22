@@ -197,7 +197,7 @@ Check that the relevant data is on persistent volumes/object storage:
 - PostgreSQL
 - claim uploads
 - policy documents
-- ChromaDB
+- ChromaDB (only with `RAG_VECTOR_BACKEND=chroma`)
 - logs where retention requires it
 
 Do not use `docker compose down -v` during routine restart because it removes named volumes.

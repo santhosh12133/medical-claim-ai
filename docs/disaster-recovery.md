@@ -19,7 +19,6 @@ Recovery planning must preserve claim integrity, auditability and policy availab
 
 - claim documents
 - policy source documents
-- ChromaDB index
 
 ### Tier 2 — Rebuildable artifacts
 
@@ -32,7 +31,7 @@ Recovery planning must preserve claim integrity, auditability and policy availab
 
 1. PostgreSQL is restored before application traffic depends on it.
 2. Claim and policy files are restored or reconnected to persistent storage.
-3. ChromaDB can be rebuilt from authoritative policy documents if necessary.
+3. Policy embeddings are restored with PostgreSQL (default `sql` vector backend); missing ones are recomputed on first query. With the optional ChromaDB backend, rebuild it with `scripts/reindex_policies.py`.
 4. Workers are started only after database/application compatibility is verified.
 5. Autonomous decisions remain disabled until the recovered environment passes release checks.
 
@@ -64,7 +63,7 @@ Claim + policy file storage
 API health/readiness
    |
    v
-Chroma restore/re-index
+Vector index check (/rag/health)
    |
    v
 Worker start
@@ -144,7 +143,7 @@ If the primary application host is lost:
 3. Restore persistent claim/policy storage.
 4. Deploy the known-good application release.
 5. Run migrations only after compatibility review.
-6. Rebuild Chroma if required.
+6. Check `/rag/health` reports the vector backend and chunk count (rebuild ChromaDB only if that backend is used).
 7. Start API and worker.
 8. Run controlled claim and policy verification tests.
 9. Keep autonomous decisions disabled until safety validation completes.

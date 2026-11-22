@@ -91,10 +91,10 @@ Employee Browser
                               +----------+----------+
                               |                     |
                               v                     v
-                         +---------+          +-----------+
-                         | Chroma  |          | Optional  |
-                         | Vectors |          | GPT       |
-                         +---------+          +-----------+
+                         +------------+       +-----------+
+                         | Embeddings |       | Optional  |
+                         | (Postgres) |       | LLM       |
+                         +------------+       +-----------+
 ```
 
 ---
@@ -115,7 +115,7 @@ flowchart LR
     AG -->|check_risks| RISK[Duplicates, dates, names,<br/>declared-vs-extracted amount]
     AG -->|verify_policy| RAG
     subgraph RAG [Hybrid RAG adjudication]
-      R1[Taxonomy + query expansion] --> R2[Dense MiniLM / Chroma + BM25<br/>RRF + rerank + date filter]
+      R1[Taxonomy + query expansion] --> R2[Dense MiniLM + BM25<br/>RRF + rerank + date filter]
       R2 --> R3[Rule extraction<br/>caps, co-pay, exclusions, deadlines]
       R3 --> R4[Deterministic adjudicator<br/>+ annual utilisation]
       R4 --> R5[Optional LLM cross-check<br/>PII-redacted, must cite]
@@ -145,7 +145,7 @@ real-world accuracy, throughput or review reduction. See the audit report for wh
 cd backend
 alembic upgrade head
 python scripts/seed_demo_users.py          # employee@demo.com / admin@demo.com (demo passwords in the script)
-python -m scripts.seed_demo_policies        # 25 demo reimbursement policies into PostgreSQL + Chroma
+python -m scripts.seed_demo_policies        # 25 demo reimbursement policies + embeddings into PostgreSQL
 python scripts/benchmark_extraction.py --count 12 --keep ../sample_bills   # writes labelled sample bills
 ```
 
@@ -155,12 +155,12 @@ coverage questions on the **Coverage Assistant** page.
 
 ### Known limitations
 
-- Extraction and decision datasets are synthetic; no real (anonymised) bills or insurer policies were evaluated.
+- Extraction and decision datasets are synthetic; no real (anonymised) bills or insurer policies were evaluated. The tooling for it is ready: see [`backend/eval/real_bills/README.md`](backend/eval/real_bills/README.md).
 - Field extraction is rule-based NLP (regular expressions + taxonomy), not a trained NER model; skewed scans remain the weakest variant (~87.5%).
-- The LLM integration (OpenAI/Anthropic) was verified only for graceful failure; no real API key was available, so LLM answers, LLM planning and LLM adjudication are untested against a live model.
+- The LLM integration (OpenAI/Anthropic) has been verified only for graceful failure so far. A live check (`scripts/llm_live_check.py`, CI job "Live LLM check") runs automatically once an `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` repository secret exists; until then, LLM answers, planning and adjudication are untested against a live model.
 - The production agent uses the deterministic `RulePlanner`; the `LLMPlanner` is implemented and unit-tested with a scripted model only.
 - Throughput was measured on a shared CI runner; real capacity depends on hardware, document mix and worker count.
-- Manual-review reduction depends on `AUTO_DECISION_ENABLED` and its confidence threshold and has not been measured on real claim traffic.
+- Manual-review reduction depends on `AUTO_DECISION_ENABLED` and its confidence threshold. On the synthetic CI mix it is about 50% (the rest is escalated, mostly by design: risk flags and deliberately ambiguous claims; the e2e report lists the reasons). It has not been measured on real claim traffic.
 
 ---
 
@@ -201,7 +201,7 @@ Policy PDF
   -> header/footer removal
   -> sentence-packing chunker sized for the embedder (sections + page numbers kept)
   -> contextual chunk headers ("Policy: ... | Section: ...") -> embeddings
-  -> ChromaDB (vectors) + PostgreSQL (chunks, versions, lifecycle)
+  -> PostgreSQL (chunks + float32 embeddings, versions, lifecycle); exact cosine search in-process
   -> optional supersession of older versions
 
 Claim
@@ -230,13 +230,13 @@ See [`docs/rag-pipeline.md`](docs/rag-pipeline.md) for the full design and the e
 | API | HTTP, auth, claim intake, admin/RAG APIs | API replica |
 | Claim worker | OCR, extraction, validation, verification | Worker replica |
 | PostgreSQL | Transactional state and audit | Managed database |
-| ChromaDB | Policy vector index | Vector service / host |
+| Vector index | Exact cosine search over embeddings stored in PostgreSQL (optional ChromaDB backend) | In-process, per API/worker replica |
 | File storage | Claim and policy documents | Persistent volume / object storage |
 | GPT provider | Optional constrained assessment | External API dependency |
 
 ### Source of truth
 
-PostgreSQL is authoritative for users, claims, claim events, policy metadata, processing state and verification audits. ChromaDB is a retrieval index, not the business-system source of truth.
+PostgreSQL is authoritative for users, claims, claim events, policy metadata, processing state and verification audits. Policy embeddings are stored next to their chunks, so there is no second datastore to keep in sync; each process builds its in-memory search index from the database and rebuilds it when policies change. Set `RAG_VECTOR_BACKEND=chroma` (and `pip install chromadb`) to use ChromaDB instead.
 
 ### Failure isolation
 
@@ -346,8 +346,8 @@ See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
 | OCR | pytesseract, RapidOCR, Pillow |
 | Documents | pypdf |
 | Embeddings | Sentence Transformers |
-| Vector search | ChromaDB |
-| AI assessment | OpenAI Responses API integration |
+| Vector search | NumPy exact cosine over PostgreSQL-stored embeddings (ChromaDB optional) |
+| AI assessment | OpenAI or Anthropic (optional, evidence-constrained) |
 | Authentication | JWT + PBKDF2-HMAC-SHA256 password hashing |
 | Background processing | PostgreSQL-backed worker queue |
 | Containers | Docker + Docker Compose |
@@ -569,9 +569,12 @@ The labelled set lives in `backend/eval/golden_claims.jsonl`. Extend it with rea
 ### Upgrading an existing deployment
 
 ```bash
-alembic upgrade head                 # migration 0009 adds claim risk/review fields and audit details
+alembic upgrade head                 # 0009: claim risk/review fields; 0010: embedding column on policy chunks
 python scripts/reindex_policies.py   # re-chunk policies stored with the old 1,200-word chunks
 ```
+
+Embeddings missing after migration 0010 are computed and stored automatically on the first query, so a
+deployment that used ChromaDB needs no manual step. Run `reindex_policies.py` to do it ahead of time.
 
 ### Decision engine benchmark
 
@@ -583,7 +586,23 @@ python scripts/benchmark_claim_decisions.py --iterations 10000
 
 ```bash
 python scripts/benchmark_ocr.py --samples 100
+python scripts/benchmark_extraction.py --seed 101                                  # synthetic, labelled
+python scripts/benchmark_extraction.py --labels eval/real_bills/private/labels.csv # your anonymised real bills
 ```
+
+See [`backend/eval/real_bills/README.md`](backend/eval/real_bills/README.md) for anonymising and labelling real bills.
+
+### Live LLM check
+
+```bash
+OPENAI_API_KEY=... python scripts/llm_live_check.py     # or ANTHROPIC_API_KEY=...
+```
+
+Checks LLM adjudication (structured output, valid citations, never above the deterministic amount), grounded
+policy Q&A (cites sources, declines uncovered topics) and the LLM agent planner (completes a clean claim,
+escalates a duplicate invoice), all on synthetic data. In CI it runs when the key is stored as a repository
+secret (**Settings → Secrets and variables → Actions → New repository secret**). An optional repository
+variable `GPT_DECISION_MODEL` or `ANTHROPIC_MODEL` picks the model.
 
 ### Staging intake load test
 

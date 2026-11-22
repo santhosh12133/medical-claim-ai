@@ -62,7 +62,7 @@ This document records significant architecture decisions so that future maintain
 
 ## ADR-005 — ChromaDB for initial vector retrieval
 
-**Status:** Accepted
+**Status:** Superseded by ADR-012
 
 **Context:** Policy verification requires semantic retrieval over document chunks.
 
@@ -80,7 +80,7 @@ This document records significant architecture decisions so that future maintain
 
 **Context:** Claims, policy metadata, processing state and audit history require transactional persistence.
 
-**Decision:** PostgreSQL remains authoritative for relational state; ChromaDB is an index, not the transactional authority.
+**Decision:** PostgreSQL remains authoritative for relational state; the vector index is derived data, not the transactional authority.
 
 **Consequences:**
 
@@ -155,3 +155,28 @@ This document records significant architecture decisions so that future maintain
 
 - Technical claims remain defensible.
 - Additional representative datasets and staging tests are required for production metrics.
+
+## ADR-012 — Store embeddings in PostgreSQL; exact in-process vector search by default
+
+**Status:** Accepted (supersedes ADR-005)
+
+**Context:** ChromaDB had published high-severity advisories with no patched release. They affect Chroma's
+standalone server, which this application never ran, but they kept a second datastore, a large dependency
+tree and an accepted-risk exception in the security gate. The policy corpus is small (thousands of chunks, not
+millions).
+
+**Decision:** Embeddings are stored as float32 bytes in `policy_chunks.embedding` (migration 0010). Each API
+and worker process loads them into a NumPy matrix and runs exact cosine search, filtered by policy metadata.
+A cheap change probe (row counts plus latest ids and timestamps, every `RAG_INDEX_PROBE_SECONDS`) rebuilds
+the matrix after policy changes made by any process. ChromaDB stays available as an opt-in backend
+(`RAG_VECTOR_BACKEND=chroma`, `pip install chromadb`).
+
+**Consequences:**
+
+- One datastore to back up and restore; no index to keep in sync. Missing embeddings are backfilled on the
+  first query.
+- Exact search: no approximate-recall loss. Measured at 0.8 ms per query for 10,000 × 384-dimensional chunks
+  (2.8 ms with a status filter); memory is about 1.5 KB per chunk per process.
+- pip-audit runs with no ignored advisories.
+- At hundreds of thousands of chunks, move to pgvector (HNSW) or a managed vector service behind the same
+  repository interface.

@@ -30,7 +30,7 @@ An audit of the original pipeline found defects that prevented most claims from 
 PDF -> page text (pypdf; OCR fallback for image-only pages) -> mojibake repair -> header/footer removal
     -> section-aware sentence packing (RAG_CHUNK_SIZE words, RAG_CHUNK_OVERLAP words of sentence overlap)
     -> embedding of "Policy: <title> | Section: <heading>\n<chunk>" (contextual header)
-    -> Chroma (vector + metadata) and PostgreSQL (chunk rows)
+    -> PostgreSQL (chunk rows with float32 embeddings; metadata from the policy document row)
 ```
 
 Chunk metadata: `policy_document_id, chunk_index, title, policy_type, policy_version, department, status,
@@ -43,7 +43,7 @@ Uploading with `supersede_previous=true` archives older active versions of the s
 
 1. **Query building** – the query uses only the treatment and its resolved category. Employee name, hospital and
    amount are excluded because they add noise to both lexical and dense matching.
-2. **Dense search** – Chroma cosine search over `status == active` chunks, `RAG_CANDIDATE_POOL` candidates.
+2. **Dense search** – exact cosine search (in-process NumPy index built from PostgreSQL; optional ChromaDB backend) over `status == active` chunks, `RAG_CANDIDATE_POOL` candidates.
 3. **Lexical search** – in-process BM25 over the same chunks. The index rebuilds when the chunk count changes, after
    writes in the same process, or every `RAG_LEXICAL_INDEX_TTL` seconds (so the worker sees API changes).
 4. **Date filter** – chunks whose policy is not effective on the claim date are dropped.

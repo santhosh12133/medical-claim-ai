@@ -34,7 +34,7 @@ Application services
       |
       +---- PostgreSQL
       +---- persistent files
-      +---- ChromaDB
+      +---- Embedding model (local)
       +---- external GPT provider
 ```
 

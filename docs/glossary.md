@@ -31,7 +31,7 @@ A segment of a policy document stored for semantic retrieval.
 A numerical representation of text used to compare semantic similarity.
 
 ## Vector Store
-A system used to index and retrieve embeddings. Medical Claim AI uses ChromaDB in the current architecture.
+A system used to index and retrieve embeddings. Medical Claim AI stores embeddings in PostgreSQL and searches them in-process by default; ChromaDB is an optional backend.
 
 ## Retrieval-Augmented Generation (RAG)
 A pattern in which relevant source evidence is retrieved before a model is asked to interpret it.

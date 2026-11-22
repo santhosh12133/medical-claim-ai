@@ -88,7 +88,7 @@ Monitor:
 
 - claim upload volume
 - policy storage volume
-- Chroma index size
+- vector index size (`/rag/health` chunk count, vector backend)
 - available filesystem space
 - object-storage errors when applicable
 

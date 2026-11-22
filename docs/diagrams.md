@@ -11,7 +11,7 @@ flowchart LR
     API[FastAPI API]
     Worker[Claim Worker]
     DB[(PostgreSQL)]
-    Vector[(ChromaDB)]
+    Vector[(Vector index<br/>embeddings in PostgreSQL)]
     Files[(Persistent Documents)]
     GPT[Optional GPT Provider]
 
@@ -58,7 +58,7 @@ sequenceDiagram
     participant A as Admin
     participant API as FastAPI
     participant DB as PostgreSQL
-    participant V as ChromaDB
+    participant V as Vector index
     participant D as Decision Engine
     participant G as Optional GPT
 
@@ -171,7 +171,7 @@ flowchart TB
     API --> Storage[(Object / Persistent Storage)]
     Worker[Worker Replicas] --> DB
     Worker --> Storage
-    Worker --> Chroma[(Chroma / Vector Service)]
+    Worker --> Chroma[(Vector index / PostgreSQL embeddings)]
     Worker --> GPT[Optional GPT Provider]
 ```
 

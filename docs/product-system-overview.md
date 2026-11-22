@@ -65,7 +65,7 @@ Document
 - Metadata: title, type, version, department, effective window and lifecycle status.
 - SHA-256 duplicate detection.
 - Chunking and embeddings.
-- ChromaDB semantic retrieval.
+- Semantic retrieval (dense embeddings stored in PostgreSQL + BM25, hybrid fusion).
 - Similarity thresholds and available metadata filtering.
 - Deterministic reimbursement-rule parsing.
 
@@ -238,8 +238,8 @@ A GPT answer is advisory and constrained. The engine treats deterministic policy
 | Claim events | PostgreSQL |
 | OCR text | PostgreSQL |
 | Policy metadata | PostgreSQL |
-| Policy chunks | PostgreSQL + ChromaDB index |
-| Vector similarity search | ChromaDB |
+| Policy chunks | PostgreSQL (text + embeddings) |
+| Vector similarity search | In-process exact cosine index (ChromaDB optional) |
 | Verification audits | PostgreSQL |
 | Claim/policy files | Persistent filesystem in current deployment; object storage is target for multi-host scale |
 

@@ -140,9 +140,9 @@ Scale worker replicas for queue backlog. CPU-heavy OCR should be scaled independ
 
 Monitor connections, CPU, memory, I/O and storage. Aggregate API + worker connections must stay within safe database limits.
 
-### ChromaDB
+### Vector search
 
-Monitor index size and query latency. At larger scale, move vector search to separately managed infrastructure when operational requirements justify it.
+The default index is exact cosine search over embeddings held in PostgreSQL and loaded into each process: about 0.8 ms per query at 10,000 chunks, and about 1.5 KB of memory per chunk per process. Monitor chunk count and `/rag/health`. At hundreds of thousands of chunks, move to pgvector or a managed vector service (ADR-012).
 
 ## 8. Performance Regression Policy
 

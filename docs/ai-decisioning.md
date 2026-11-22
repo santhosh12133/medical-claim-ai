@@ -95,7 +95,7 @@ PDF
  -> normalization
  -> chunks
  -> Sentence Transformer embeddings
- -> ChromaDB
+ -> vector search (embeddings in PostgreSQL)
  -> PostgreSQL policy metadata + chunk records
 ```
 

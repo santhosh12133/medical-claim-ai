@@ -13,7 +13,7 @@ PostgreSQL           OCR Service
 RAG Services
        |------------------|
        v                  v
-ChromaDB         Sentence Transformers
+PostgreSQL vectors  Sentence Transformers
 ```
 
 ## Request Flow
@@ -23,7 +23,7 @@ ChromaDB         Sentence Transformers
 3. OCR text is parsed with regex-based extraction for the MVP.
 4. The extracted claim, including treatment and amount, is stored in PostgreSQL.
 5. Admin users can run policy verification against the stored claim.
-6. The RAG subsystem embeds the claim query, retrieves top-K policy chunks from ChromaDB, parses the applicable reimbursement limit, and returns an explainable decision.
+6. The RAG subsystem embeds the claim query, retrieves top-K policy chunks (dense + BM25 hybrid over embeddings stored in PostgreSQL), parses the applicable reimbursement limit, and returns an explainable decision.
 7. PostgreSQL stores the full verification audit and the latest policy decision summary on the claim.
 8. Admin users approve or reject claims from the dashboard.
 

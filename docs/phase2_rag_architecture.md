@@ -1,5 +1,7 @@
 # Phase 2 RAG Architecture
 
+> **Historical design document.** The current pipeline is described in [rag-pipeline.md](rag-pipeline.md). Since ADR-012, embeddings are stored in PostgreSQL and searched in-process by default; ChromaDB, described below, is an optional backend.
+
 ## Goal
 
 Phase 2 turns Medical Claim AI into a policy-aware verification platform for GAIL-style medical reimbursement policies. Policy PDFs are parsed, chunked, embedded with `sentence-transformers/all-MiniLM-L6-v2`, stored in ChromaDB, retrieved by semantic similarity, and used by a deterministic verification engine to produce explainable claim decisions.
