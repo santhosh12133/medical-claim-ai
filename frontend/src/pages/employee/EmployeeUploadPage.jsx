@@ -14,6 +14,7 @@ export function EmployeeUploadPage() {
   const inputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [treatment, setTreatment] = useState('');
+  const [declaredAmount, setDeclaredAmount] = useState('');
   const [dragging, setDragging] = useState(false);
   const [claim, setClaim] = useState(null);
   const [polling, setPolling] = useState(false);
@@ -59,6 +60,7 @@ export function EmployeeUploadPage() {
     const formData = new FormData();
     formData.append('file', file);
     if (treatment.trim()) formData.append('treatment', treatment.trim());
+    if (declaredAmount) formData.append('declared_amount', declaredAmount);
     setSubmitting(true);
     try {
       const response = await api.post('/claims/upload', formData);
@@ -66,6 +68,7 @@ export function EmployeeUploadPage() {
       setPolling(true);
       setFile(null);
       setTreatment('');
+      setDeclaredAmount('');
       if (inputRef.current) inputRef.current.value = '';
     } catch (submissionError) {
       setError(errorMessage(submissionError, 'Upload failed. Please try again.'));
@@ -97,6 +100,11 @@ export function EmployeeUploadPage() {
           <label>
             Treatment (optional)
             <input value={treatment} maxLength={120} placeholder="e.g. Root canal, MRI scan, Physiotherapy" onChange={(event) => setTreatment(event.target.value)} />
+          </label>
+          <label>
+            Amount you are claiming (optional)
+            <input type="number" min="1" step="0.01" value={declaredAmount} placeholder="₹ — checked against the bill total"
+              onChange={(event) => setDeclaredAmount(event.target.value)} />
           </label>
           <button type="submit" disabled={submitting || !file}>{submitting ? 'Uploading…' : 'Upload & submit claim'}</button>
           {error ? <p className="error-text" role="alert">{error}</p> : null}

@@ -23,6 +23,36 @@ const auditToVerification = (audit) => ({
   confidence_breakdown: {},
 });
 
+function AgentTrace({ claimId, refreshKey }) {
+  const [run, setRun] = useState(null);
+
+  useEffect(() => {
+    api.get(`/claims/${claimId}/events`)
+      .then((response) => {
+        const latest = [...response.data].reverse().find((event) => event.event_type === 'AGENT_RUN');
+        setRun(latest ? JSON.parse(latest.metadata_json || '{}') : null);
+      })
+      .catch(() => setRun(null));
+  }, [claimId, refreshKey]);
+
+  if (!run?.steps?.length) return null;
+  return (
+    <details className="evidence__details" open>
+      <summary>Agent trace · {run.outcome}{run.escalation_reason ? ` — ${run.escalation_reason}` : ''} · planner: {run.planner}</summary>
+      <ol className="trace">
+        {run.steps.map((step) => (
+          <li key={step.step}>
+            <strong>{step.tool}</strong>{Object.keys(step.args || {}).length ? ` ${JSON.stringify(step.args)}` : ''}
+            {' — '}<span className="muted-text">{step.rationale}</span>
+            {step.status === 'error' ? <span className="error-text"> (failed after {step.attempts} attempts)</span> : null}
+            {step.attempts > 1 && step.status !== 'error' ? <span className="muted-text"> (succeeded on attempt {step.attempts})</span> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 function ReviewCard({ claim, onChanged, notify }) {
   const [open, setOpen] = useState(false);
   const [verification, setVerification] = useState(null);
@@ -126,6 +156,10 @@ function ReviewCard({ claim, onChanged, notify }) {
 
       {open ? (
         <div className="review-card__body">
+          <AgentTrace claimId={claim.id} refreshKey={claim.updated_at} />
+          {claim.declared_amount != null && claim.amount != null ? (
+            <p className="muted-text">Declared {formatMoney(claim.declared_amount)} · bill total read as {formatMoney(claim.amount)}</p>
+          ) : null}
           {verification ? <EvidencePanel verification={verification} /> : <p className="hint">No policy verification yet. Run “Verify policy” to retrieve evidence.</p>}
           <div className="decision-form">
             <label>
