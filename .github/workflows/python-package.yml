@@ -169,18 +169,26 @@ jobs:
       - name: Install scanners
         run: python -m pip install pip-audit bandit
 
+      # Accepted risks are listed with their justification in backend/security/accepted-vulnerabilities.md.
+      # Any vulnerability not listed there fails the build.
       - name: Python dependency vulnerabilities (pip-audit)
-        run: pip-audit -r backend/requirements.txt --desc
+        run: >-
+          pip-audit -r backend/requirements.txt --desc
+          --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
+          --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815
 
       - name: Python static security analysis (bandit, medium+)
+        if: always()
         run: bandit -r backend -x backend/tests -ll -q -c backend/bandit.yaml
 
       - name: Set up Node.js
+        if: always()
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: npm dependency vulnerabilities (high+)
+        if: always()
         working-directory: frontend
         run: npm audit --audit-level=high
 
