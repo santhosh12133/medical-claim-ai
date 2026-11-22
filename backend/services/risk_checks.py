@@ -85,6 +85,16 @@ def _check_duplicates(risk: RiskAssessment, active_prior: list[PriorClaim], docu
             return
 
 
+def _check_amounts(risk: RiskAssessment, amount, declared_amount) -> None:
+    if amount is not None and Decimal(str(amount)) > Decimal("10000000"):
+        risk.add("AMOUNT_OUT_OF_RANGE", "Bill total above ₹1 crore; likely an OCR error")
+    if declared_amount is None or amount is None:
+        return
+    declared, extracted = Decimal(str(declared_amount)), Decimal(str(amount))
+    if abs(declared - extracted) > max(Decimal("1"), extracted * Decimal("0.01")):
+        risk.add("AMOUNT_MISMATCH", f"Declared amount {declared} differs from the bill total {extracted}")
+
+
 def assess_claim_risk(
     *,
     document_sha256: str | None,
@@ -98,6 +108,7 @@ def assess_claim_risk(
     invoice_number: str | None = None,
     max_bill_age_days: int = 365,
     ocr_text: str | None = None,
+    declared_amount: Decimal | float | None = None,
 ) -> RiskAssessment:
     risk = RiskAssessment()
     active_prior = [claim for claim in prior_claims if (claim.status or "").lower() != "rejected"]
@@ -111,6 +122,8 @@ def assess_claim_risk(
 
     if patient_name and employee_name and not names_match(patient_name, employee_name):
         risk.add("PATIENT_NAME_MISMATCH", "Patient name on the bill differs from the employee; verify dependent eligibility")
+
+    _check_amounts(risk, amount, declared_amount)
 
     if ocr_text is not None and len(ocr_text.strip()) < 40:
         risk.add("OCR_LOW_QUALITY", "Very little text could be read from the document")

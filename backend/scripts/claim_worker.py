@@ -29,9 +29,11 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Claim
 from ocr.extract import extract_text
+from rag.agent.core import AgentState, ClaimAgent, LLMPlanner, RulePlanner
 from rag.config.logging import configure_logging
 from rag.config.settings import get_rag_settings
 from rag.decisions import BLOCKING_FLAGS
+from rag.llm.providers import build_provider
 from rag.repositories.verification_repository import VerificationRepository
 from rag.repositories.vector_repository import ChromaPolicyVectorRepository
 from rag.services.embedding_service import EmbeddingService
@@ -40,6 +42,7 @@ from rag.services.retrieval_service import PolicyRetrievalService
 from rag.services.rule_parser import RuleParser
 from rag.services.taxonomy import get_taxonomy
 from rag.services.verification_service import ClaimVerificationService
+from services.claim_agent_tools import build_claim_tools
 from services.claim_events import record_claim_event
 from services.claim_validation import extract_claim_fields, validate_claim_fields
 from services.risk_checks import PriorClaim, assess_claim_risk
@@ -48,12 +51,16 @@ logger = logging.getLogger(__name__)
 
 
 class ClaimWorker:
-    def __init__(self, max_attempts: int = 3, auto_verify: bool = True, lease_minutes: int = 15):
+    def __init__(self, max_attempts: int = 3, auto_verify: bool = True, lease_minutes: int = 15,
+                 use_agent: bool = True, llm_planner: bool = False):
         self.max_attempts = max_attempts
         self.settings = get_rag_settings()
         self.auto_verify = auto_verify and self.settings.rag_enabled
         self.lease = timedelta(minutes=lease_minutes)
+        self.use_agent = use_agent and self.auto_verify
         self._verification_dependencies = None
+        provider = build_provider(self.settings, purpose="decision") if llm_planner else None
+        self.planner = LLMPlanner(provider) if provider is not None else RulePlanner()
 
     def _claim_verification_service(self, db: Session) -> ClaimVerificationService:
         if self._verification_dependencies is None:
@@ -124,10 +131,38 @@ class ClaimWorker:
 
     # ------------------------------------------------------------ processing
     def process_claim(self, claim_id: int) -> None:
+        if self.use_agent:
+            self._run_agent(claim_id)
+            return
         if not self._extract_and_validate(claim_id):
             return
         if self.auto_verify:
             self._verify(claim_id)
+
+    def _run_agent(self, claim_id: int) -> AgentState:
+        """Agentic path: the planner chooses OCR/extraction/risk/verification/escalation steps from intermediate results."""
+        registry = build_claim_tools(SessionLocal, self._claim_verification_service)
+        state = ClaimAgent(registry, self.planner).run(AgentState(claim_id=claim_id))
+        trace = [record.as_dict() for record in state.history]
+        with SessionLocal() as db:
+            claim = db.get(Claim, claim_id)
+            if claim is None:
+                return state
+            record_claim_event(db, claim_id, "AGENT_RUN", f"Agent finished: {state.outcome}", status_after=claim.status,
+                               metadata={"outcome": state.outcome, "planner": getattr(self.planner, "name", "rule"),
+                                         "escalation_reason": state.escalation_reason, "steps": trace})
+            db.commit()
+        if state.outcome == "failed":
+            error = RuntimeError(f"Agent tool '{state.failed_tool}' failed: {trace[-1]['observation'].get('message', '')}")
+            with SessionLocal() as db:
+                if state.failed_tool in {"run_ocr", "extract_fields"}:
+                    self._mark_failed(db, claim_id, error)  # retry the whole claim later
+                else:
+                    claim = db.get(Claim, claim_id)
+                    claim.status = "Needs Attention"
+                    record_claim_event(db, claim_id, "HUMAN_REVIEW_REQUESTED", str(error)[:500], status_after=claim.status)
+                    db.commit()
+        return state
 
     def _extract_and_validate(self, claim_id: int) -> bool:
         """OCR + extraction + risk checks. Returns True when the claim is ready for policy verification."""
@@ -200,6 +235,7 @@ class ClaimWorker:
             prior_claims=prior,
             invoice_number=claim.invoice_number,
             ocr_text=ocr_text,
+            declared_amount=claim.declared_amount,
         )
 
     def _mark_failed(self, db: Session, claim_id: int, exc: Exception) -> None:
@@ -267,13 +303,17 @@ def main() -> None:
     parser.add_argument("--max-attempts", type=int, default=int(os.getenv("CLAIM_WORKER_MAX_ATTEMPTS", "3")))
     parser.add_argument("--lease-minutes", type=int, default=int(os.getenv("CLAIM_WORKER_LEASE_MINUTES", "15")))
     parser.add_argument("--no-auto-verify", action="store_true", help="Skip automatic policy verification")
+    parser.add_argument("--no-agent", action="store_true", help="Use the fixed pipeline instead of the planning agent")
     args = parser.parse_args()
 
     if args.batch_size < 1 or args.workers < 1 or args.max_attempts < 1 or args.lease_minutes < 1:
         parser.error("batch-size, workers, max-attempts and lease-minutes must be positive")
     configure_logging()
     auto_verify = not args.no_auto_verify and os.getenv("CLAIM_AUTO_VERIFY", "true").lower() in {"1", "true", "yes", "on"}
-    worker = ClaimWorker(max_attempts=args.max_attempts, auto_verify=auto_verify, lease_minutes=args.lease_minutes)
+    use_agent = not args.no_agent and os.getenv("CLAIM_AGENT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    llm_planner = os.getenv("AGENT_LLM_PLANNER", "false").lower() in {"1", "true", "yes", "on"}
+    worker = ClaimWorker(max_attempts=args.max_attempts, auto_verify=auto_verify, lease_minutes=args.lease_minutes,
+                         use_agent=use_agent, llm_planner=llm_planner)
     if args.once:
         logger.info("Processed %s claims", worker.run_once(args.batch_size))
         return

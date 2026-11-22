@@ -54,6 +54,10 @@ from rag.services.qa_service import PolicyQAService  # noqa: E402
 from rag.services.retrieval_service import PolicyRetrievalService  # noqa: E402
 from rag.services.rule_parser import RuleParser  # noqa: E402
 from rag.services.verification_service import ClaimVerificationService  # noqa: E402
+from rag.agent.core import AgentState, ClaimAgent, RulePlanner  # noqa: E402
+from services.claim_agent_tools import build_claim_tools  # noqa: E402
+
+SAMPLE_INVOICE = Path(__file__).resolve().parents[1] / "sample_invoice.png"
 
 DENTAL_CHUNK = IndexedChunk(
     "policy-1-chunk-0",
@@ -84,6 +88,7 @@ def client():
         for name, email, role, password in [
             ("Ravi Kumar", "employee@test.com", "employee", "employee123"),
             ("Other Person", "other@test.com", "employee", "other123"),
+            ("Santhosh", "santhosh@test.com", "employee", "santhosh123"),
             ("Admin", "admin@test.com", "admin", "admin123"),
         ]:
             password_hash, salt = hash_password(password)
@@ -104,7 +109,7 @@ def _token(client, email, password):
 
 def _png(color=(255, 255, 255)) -> bytes:
     buffer = io.BytesIO()
-    Image.new("RGB", (40, 20), color).save(buffer, format="PNG")
+    Image.new("RGB", (400, 300), color).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -260,3 +265,97 @@ def test_policy_question_answering_for_employees(client):
     assert body["coverage_estimate"]["estimated_reimbursement"] == "15000.00"
     taxonomy = client.get("/rag/taxonomy", headers=employee)
     assert any(item["category"] == "Dental" for item in taxonomy.json()["categories"])
+
+
+def test_swagger_ui_and_openapi_schema(client):
+    docs = client.get("/docs")
+    assert docs.status_code == 200 and "swagger-ui" in docs.text.lower()
+    schema = client.get("/openapi.json").json()
+    for path in ("/claims/upload", "/rag/ask", "/rag/claims/{claim_id}/verify", "/rag/policies/ingest"):
+        assert path in schema["paths"]
+
+
+def test_corrupted_and_unsupported_uploads_are_rejected(client):
+    employee = _token(client, "employee@test.com", "employee123")
+    corrupted = client.post("/claims/upload", headers=employee,
+                            files={"file": ("bill.pdf", b"%PDF-1.4\nnot really a pdf", "application/pdf")})
+    assert corrupted.status_code == 400 and "corrupted" in corrupted.json()["detail"]
+    text_file = client.post("/claims/upload", headers=employee, files={"file": ("bill.txt", b"hello", "text/plain")})
+    assert text_file.status_code == 400
+    unauthenticated = client.post("/claims/upload", files={"file": ("bill.png", _png(), "image/png")})
+    assert unauthenticated.status_code == 401
+
+
+def _agent_settings():
+    return _settings(auto_decision_enabled=True, auto_decision_min_confidence=0.6)
+
+
+def _run_agent(claim_id: int):
+    settings = _agent_settings()
+
+    def verification_factory(db):
+        return ClaimVerificationService(db, _retrieval(settings), VerificationRepository(db), RuleParser(),
+                                        GPTDecisionService(settings), settings)
+
+    registry = build_claim_tools(SessionLocal, verification_factory)
+    return ClaimAgent(registry, RulePlanner(), sleep=lambda seconds: None).run(AgentState(claim_id=claim_id))
+
+
+def _upload_sample(client, email, password, **form):
+    headers = _token(client, email, password)
+    with SAMPLE_INVOICE.open("rb") as handle:
+        response = client.post("/claims/upload", headers=headers, data=form,
+                               files={"file": ("invoice.png", handle.read(), "image/png")})
+    assert response.status_code == 200, response.text
+    return response.json()["id"], headers
+
+
+def test_agent_processes_real_invoice_and_escalates_patient_mismatch(client):
+    """Real OCR on sample_invoice.png -> NLP -> risk checks -> hybrid RAG verification -> escalation."""
+    claim_id, headers = _upload_sample(client, "other@test.com", "other123", treatment="Root canal",
+                                       declared_amount="12500")
+    state = _run_agent(claim_id)
+    tools = [record.tool for record in state.history]
+    assert tools[:3] == ["run_ocr", "extract_fields", "check_risks"]
+    assert "verify_policy" in tools
+    assert state.outcome == "escalated"
+    assert "PATIENT_NAME_MISMATCH" in state.escalation_reason  # bill is for "Santhosh", uploader is "Other Person"
+
+    claim = client.get(f"/claims/{claim_id}", headers=headers).json()
+    assert claim["amount"] == 12500
+    assert claim["claim_date"] == "2026-01-12"
+    assert claim["hospital_name"] == "Apollo Hospital"
+    assert claim["status"] == "Needs Attention"
+    assert claim["extraction_json"]["fields"]["patient_name"] == "Santhosh"
+    assert claim["policy_decision"] == "Needs Human Review"
+
+
+def test_agent_auto_decides_clean_invoice_end_to_end(client):
+    claim_id, headers = _upload_sample(client, "santhosh@test.com", "santhosh123", treatment="Root canal",
+                                       declared_amount="12500")
+    state = _run_agent(claim_id)
+    assert state.outcome == "completed", [record.as_dict() for record in state.history]
+    claim = client.get(f"/claims/{claim_id}", headers=headers).json()
+    assert claim["status"] == "Approved"
+    assert claim["final_approved_amount"] == 12500
+    with SessionLocal() as db:
+        events = [event.event_type for event in db.query(ClaimEvent).filter(ClaimEvent.claim_id == claim_id)]
+    assert "CLAIM_AUTO_DECIDED" in events
+
+
+def test_declared_amount_mismatch_blocks_auto_decision(client):
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.email == "santhosh@test.com").one()
+        user.full_name = "Santhosh"
+        db.commit()
+    # Same invoice for the same user is a duplicate upload (409); use a re-encoded copy to reach the agent.
+    image = Image.open(SAMPLE_INVOICE).convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    headers = _token(client, "santhosh@test.com", "santhosh123")
+    response = client.post("/claims/upload", headers=headers, data={"treatment": "Root canal", "declared_amount": "15500"},
+                           files={"file": ("invoice-copy.png", buffer.getvalue(), "image/png")})
+    assert response.status_code == 200, response.text
+    state = _run_agent(response.json()["id"])
+    assert state.outcome == "escalated"
+    assert "AMOUNT_MISMATCH" in state.escalation_reason

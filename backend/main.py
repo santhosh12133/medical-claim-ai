@@ -33,6 +33,7 @@ from schemas import (
     UserRead,
 )
 from services.claim_events import record_claim_event
+from services.document_validation import DocumentValidationError, validate_document
 
 configure_logging()
 logger = logging.getLogger("medical_claim_ai.api")
@@ -233,46 +234,31 @@ def _record_event(
     record_claim_event(db, claim_id, event_type, message, actor_user_id, status_before, status_after, metadata)
 
 
-def _validate_upload_content(filename: str, content: bytes) -> None:
-    """Validate the file signature as well as the extension to reduce spoofed uploads."""
-    suffix = Path(filename).suffix.lower()
-    signatures = {
-        ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
-        ".jpg": content.startswith(b"\xff\xd8\xff"),
-        ".jpeg": content.startswith(b"\xff\xd8\xff"),
-        ".webp": len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP",
-        ".pdf": content.startswith(b"%PDF"),
-    }
-    if not signatures.get(suffix, False):
-        raise HTTPException(status_code=400, detail="File content does not match its extension")
-
-
 @app.post("/claims/upload", response_model=ClaimRead)
 async def upload_claim(
     file: UploadFile = File(...),
     employee_name: str = Form(""),
     treatment: str | None = Form(None),
+    declared_amount: float | None = Form(None, gt=0, description="Amount the employee is claiming (cross-checked with OCR)"),
     current_user: User = Depends(require_employee),
     db: Session = Depends(get_db),
 ):
     del employee_name
 
     suffix = Path(file.filename or "claim-image").suffix.lower()
-    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
-    if suffix not in allowed_suffixes:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
 
     max_size_mb = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
     if max_size_mb <= 0:
         raise HTTPException(status_code=500, detail="Invalid upload size configuration")
     max_size = max_size_mb * 1024 * 1024
 
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    content = await file.read(max_size + 1)
     if len(content) > max_size:
         raise HTTPException(status_code=413, detail=f"File size must not exceed {max_size_mb} MB")
-    _validate_upload_content(file.filename or "claim-image", content)
+    try:
+        validate_document(file.filename or "claim-image", content)
+    except DocumentValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     document_sha256 = hashlib.sha256(content).hexdigest()
     duplicate = (
@@ -298,6 +284,7 @@ async def upload_claim(
             processing_status="queued",
             processing_attempts=0,
             document_sha256=document_sha256,
+            declared_amount=Decimal(str(declared_amount)).quantize(Decimal("0.01")) if declared_amount else None,
         )
         db.add(claim)
         db.flush()

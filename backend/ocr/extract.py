@@ -35,26 +35,89 @@ def _rapidocr_engine():  # pragma: no cover - optional dependency
     return RapidOCR()
 
 
-def preprocess_image(image: Image.Image) -> Image.Image:
+def estimate_skew(image: Image.Image, max_angle: float = 5.0, step: float = 0.5) -> float:
+    """Projection-profile deskew: the rotation that makes text rows sharpest (highest row-sum variance)."""
+    sample = image.convert("L")
+    sample.thumbnail((800, 800))
+    binary = sample.point(lambda value: 255 if value < 160 else 0)
+    best_angle, best_score = 0.0, -1.0
+    angle = -max_angle
+    while angle <= max_angle + 1e-9:
+        rotated = binary.rotate(angle, resample=Image.NEAREST, fillcolor=0)
+        width = rotated.width
+        rows = [sum(rotated.crop((0, y, width, y + 1)).getdata()) for y in range(rotated.height)]
+        mean = sum(rows) / len(rows)
+        score = sum((row - mean) ** 2 for row in rows)
+        if score > best_score:
+            best_angle, best_score = angle, score
+        angle += step
+    return best_angle
+
+
+_BILL_LABELS = (
+    re.compile(r"\b(?:patient|name)\b", re.IGNORECASE),
+    re.compile(r"\bdate\b", re.IGNORECASE),
+    re.compile(r"\b(?:total|payable|amount)\b", re.IGNORECASE),
+    re.compile(r"\b(?:invoice|bill|receipt)\s*(?:no|number|#)", re.IGNORECASE),
+    re.compile(r"\b(?:hospital|clinic|centre|center|healthcare|diagnostics|nursing)\b", re.IGNORECASE),
+)
+
+
+def label_score(text: str) -> int:
+    """How many standard bill labels were read: a cheap proxy for OCR quality."""
+    return sum(1 for pattern in _BILL_LABELS if pattern.search(text))
+
+
+def preprocess_image(image: Image.Image, enhanced: bool = False, despeckle: bool = False) -> Image.Image:
+    """Grayscale -> (despeckle) -> upscale -> auto-contrast -> deskew -> sharpen (or binarise when enhanced).
+
+    ``despeckle`` applies a median filter at native resolution, which removes phone/scanner speckle but
+    also thins very small text, so it is only used as a second pass when the first read looks poor.
+    """
     image = ImageOps.exif_transpose(image)
     image = image.convert("L")
-    if image.width < _MIN_WIDTH:
-        scale = min(4.0, _MIN_WIDTH / max(1, image.width))
+    if despeckle or enhanced:
+        image = image.filter(ImageFilter.MedianFilter(5 if enhanced else 3))
+    min_width = _MIN_WIDTH * (1.5 if enhanced else 1)
+    if image.width < min_width:
+        scale = min(4.0, min_width / max(1, image.width))
         image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
-    image = ImageOps.autocontrast(image, cutoff=1)
+    if not (despeckle or enhanced):
+        image = image.filter(ImageFilter.MedianFilter(3))
+    image = ImageOps.autocontrast(image, cutoff=2 if enhanced else 1)
+    angle = estimate_skew(image)
+    if abs(angle) >= 0.5:
+        image = image.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
+    if enhanced:
+        image = image.filter(ImageFilter.MedianFilter(3))
+        return image.point(lambda value: 255 if value > 150 else 0)
     return image.filter(ImageFilter.SHARPEN)
 
 
+_DASH_LOOKALIKES = re.compile(r"(?<=[A-Za-z0-9])[~\u2014\u2013](?=[A-Za-z0-9])")
+
+
 def clean_ocr_text(text: str) -> str:
+    """Remove OCR artefacts; keep double spaces, which separate label/value columns on bills."""
     text = _ARTEFACTS.sub("", text.replace("\x0c", "\n"))
-    lines = [" ".join(line.split()) for line in text.splitlines()]
+    text = _DASH_LOOKALIKES.sub("-", text)
+    text = re.sub(r"(?<=[A-Za-z])[\u2018\u2019\u201c\u201d](?=[A-Za-z])", " ", text)  # "Divya‘Rao" -> "Divya Rao"
+    lines = [re.sub(r"[ \t]{2,}", "  ", line).strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line).strip()
 
 
-def _extract_with_tesseract(image: Image.Image) -> str:
+def _extract_with_tesseract(image: Image.Image, enhanced: bool = False) -> str:
     import pytesseract
 
-    return pytesseract.image_to_string(preprocess_image(image), config="--oem 3 --psm 6")
+    def read(despeckle: bool) -> str:
+        processed = preprocess_image(image, enhanced=enhanced, despeckle=despeckle)
+        return pytesseract.image_to_string(processed, config=f"--oem 3 --psm {4 if enhanced else 6}")
+
+    first = read(despeckle=False)
+    if enhanced or label_score(first) >= 4:
+        return first
+    second = read(despeckle=True)  # noisy scan: retry with despeckling, keep whichever read more of the bill
+    return second if label_score(second) > label_score(first) else first
 
 
 def _extract_with_rapidocr(image_source) -> str:  # pragma: no cover - optional dependency
@@ -65,9 +128,9 @@ def _extract_with_rapidocr(image_source) -> str:  # pragma: no cover - optional 
     return "\n".join(item[1] for item in result if len(item) > 1 and item[1])
 
 
-def _ocr_image(image: Image.Image, source_for_rapidocr) -> str:
+def _ocr_image(image: Image.Image, source_for_rapidocr, enhanced: bool = False) -> str:
     try:
-        text = _extract_with_tesseract(image)
+        text = _extract_with_tesseract(image, enhanced)
         if text.strip():
             return text
     except Exception as exc:  # TesseractNotFoundError or runtime failures
@@ -79,13 +142,13 @@ def _ocr_image(image: Image.Image, source_for_rapidocr) -> str:
         return ""
 
 
-def extract_text_from_image_bytes(data: bytes) -> str:
+def extract_text_from_image_bytes(data: bytes, enhanced: bool = False) -> str:
     with Image.open(io.BytesIO(data)) as image:
         image.load()
-        return clean_ocr_text(_ocr_image(image, data))
+        return clean_ocr_text(_ocr_image(image, data, enhanced))
 
 
-def _extract_pdf_text(pdf_path: str | Path) -> str:
+def _extract_pdf_text(pdf_path: str | Path, enhanced: bool = False) -> str:
     """Extract embedded text from a PDF, OCR-ing page images when a page has no text layer."""
     reader = PdfReader(str(pdf_path))
     pages = []
@@ -96,7 +159,7 @@ def _extract_pdf_text(pdf_path: str | Path) -> str:
             text = ""
         if not text.strip():
             try:
-                text = "\n".join(extract_text_from_image_bytes(image.data) for image in page.images)
+                text = "\n".join(extract_text_from_image_bytes(image.data, enhanced) for image in page.images)
             except Exception:
                 logger.warning("Could not OCR images in scanned PDF page", exc_info=True)
                 text = ""
@@ -105,11 +168,12 @@ def _extract_pdf_text(pdf_path: str | Path) -> str:
     return clean_ocr_text("\n\n".join(pages))
 
 
-def extract_text(file_path: str | Path) -> str:
+def extract_text(file_path: str | Path, enhanced: bool = False) -> str:
+    """OCR a bill. ``enhanced=True`` adds denoising/binarisation for poor scans (used by the agent's retry)."""
     path = Path(file_path)
     if path.suffix.lower() == ".pdf":
-        return _extract_pdf_text(path)
+        return _extract_pdf_text(path, enhanced)
 
     with Image.open(path) as image:
         image.load()
-        return clean_ocr_text(_ocr_image(image, str(path)))
+        return clean_ocr_text(_ocr_image(image, str(path), enhanced))

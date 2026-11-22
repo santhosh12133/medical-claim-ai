@@ -29,6 +29,9 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      - name: Install OCR engine
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr fonts-dejavu-core
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -44,6 +47,86 @@ jobs:
 
       - name: RAG quality gate (offline golden set)
         run: python scripts/evaluate_rag.py --min-hit-rate 0.95 --min-decision-accuracy 0.95 --max-unsafe-rate 0
+
+  e2e:
+    name: End-to-end (PostgreSQL + API + worker + real embeddings)
+    runs-on: ubuntu-latest
+    needs: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: medical_claims
+          POSTGRES_USER: medical_claims
+          POSTGRES_PASSWORD: e2e-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U medical_claims -d medical_claims"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://medical_claims:e2e-password@localhost:5432/medical_claims
+      SECRET_KEY: e2e-only-secret-key-not-used-anywhere-else-0123456789
+      AUTO_DECISION_ENABLED: "true"
+      AUTO_DECISION_MIN_CONFIDENCE: "0.85"
+      LOGIN_MAX_ATTEMPTS: "1000"
+      TOKENIZERS_PARALLELISM: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install OCR engine
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr fonts-dejavu-core
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Migrate PostgreSQL (and verify 0009 downgrade/upgrade)
+        run: |
+          alembic upgrade head
+          alembic downgrade 0008_async_claim_processing
+          alembic upgrade head
+          alembic current
+
+      - name: Seed users and demo policies (real embeddings into Chroma)
+        run: |
+          python scripts/seed_demo_users.py
+          python -m scripts.seed_demo_policies
+
+      - name: Start API
+        run: |
+          nohup uvicorn main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/health/ready && break; sleep 2; done
+
+      - name: End-to-end scenarios and throughput
+        run: python scripts/e2e_check.py --claims 36 --report e2e_report.json
+
+      - name: RAG evaluation with dense + BM25 retrieval
+        run: python scripts/evaluate_rag.py --embeddings --json rag_eval_hybrid.json
+
+      - name: OCR extraction accuracy (held-out synthetic set)
+        run: python scripts/benchmark_extraction.py --count 120 --seed 7 --json extraction_report.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: |
+            backend/e2e_report.json
+            backend/rag_eval_hybrid.json
+            backend/extraction_report.json
+            backend/api.log
+            backend/logs/
 
   frontend:
     runs-on: ubuntu-latest

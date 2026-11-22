@@ -35,6 +35,8 @@ class Claim(Base):
     policy_category = Column(String(100), nullable=True, index=True)
     risk_flags_json = Column(JSON, nullable=True)
     final_approved_amount = Column(Numeric(12, 2), nullable=True)
+    declared_amount = Column(Numeric(12, 2), nullable=True)
+    extraction_json = Column(JSON, nullable=True)
     reviewer_notes = Column(Text, nullable=True)
     reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)

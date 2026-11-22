@@ -43,6 +43,8 @@ BLOCKING_FLAGS = frozenset(
         "PATIENT_NAME_MISMATCH",
         "PROMPT_INJECTION_SUSPECTED",
         "OCR_LOW_QUALITY",
+        "AMOUNT_MISMATCH",
+        "AMOUNT_OUT_OF_RANGE",
     }
 )
 

@@ -60,6 +60,8 @@ class ClaimRead(ClaimBase):
     invoice_number: Optional[str] = None
     risk_flags_json: Optional[list[str]] = None
     final_approved_amount: Optional[float] = None
+    declared_amount: Optional[float] = None
+    extraction_json: Optional[dict[str, Any]] = None
     reviewer_notes: Optional[str] = None
     reviewed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

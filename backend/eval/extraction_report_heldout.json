@@ -1,0 +1,590 @@
+{
+  "methodology": "synthetic labelled invoices; exact match after normalisation; missing = wrong",
+  "seed": 7,
+  "documents": 120,
+  "field_checks": 720,
+  "overall_field_accuracy": 0.8861,
+  "documents_fully_correct": 74,
+  "per_field_accuracy": {
+    "patient_name": 0.8417,
+    "hospital_name": 0.875,
+    "amount": 0.95,
+    "claim_date": 0.8667,
+    "invoice_number": 0.8333,
+    "category": 0.95
+  },
+  "per_variant_accuracy": {
+    "clean_png": 1.0,
+    "phone_photo": 0.7833,
+    "low_res": 1.0,
+    "text_pdf": 1.0,
+    "scanned_pdf": 0.8,
+    "skewed_scan": 0.7333
+  },
+  "ocr_extraction_seconds": {
+    "mean": 0.631,
+    "median": 0.601,
+    "p95": 1.351,
+    "max": 1.459
+  },
+  "failures": [
+    {
+      "doc": "inv-004_scanned_pdf.pdf",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-01-31",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-12247",
+          "got": "INV"
+        }
+      }
+    },
+    {
+      "doc": "inv-005_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Medicover Clinic",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-007_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Ravi Kumar",
+          "got": "None"
+        },
+        "amount": {
+          "expected": 33490.0,
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-011_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sri Sai Nursing Home",
+          "got": "Sri Sal Nursing Home"
+        }
+      }
+    },
+    {
+      "doc": "inv-013_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Santhosh Kumar",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-016_scanned_pdf.pdf",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sunrise Eye Care",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "BL-84766",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-019_phone_photo.jpg",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-02-23",
+          "got": "2028-02-23"
+        },
+        "invoice_number": {
+          "expected": "BL-42116",
+          "got": "BL-2116"
+        }
+      }
+    },
+    {
+      "doc": "inv-022_scanned_pdf.pdf",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-02-17",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-023_skewed_scan.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Priya Nair",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-025_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Vikram Singh",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-028_scanned_pdf.pdf",
+      "wrong": {
+        "patient_name": {
+          "expected": "Suresh Babu",
+          "got": "Suresh Babu Sate"
+        }
+      }
+    },
+    {
+      "doc": "inv-031_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Divya Rao",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-034_scanned_pdf.pdf",
+      "wrong": {
+        "patient_name": {
+          "expected": "Suresh Babu",
+          "got": "Suresh"
+        }
+      }
+    },
+    {
+      "doc": "inv-037_phone_photo.jpg",
+      "wrong": {
+        "amount": {
+          "expected": 47790.0,
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-93548",
+          "got": "sINV98S4B"
+        }
+      }
+    },
+    {
+      "doc": "inv-046_scanned_pdf.pdf",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Medicover Clinic",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-047_skewed_scan.jpg",
+      "wrong": {
+        "invoice_number": {
+          "expected": "BL-14547",
+          "got": "BL-14847"
+        }
+      }
+    },
+    {
+      "doc": "inv-049_phone_photo.jpg",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-01-11",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-052_scanned_pdf.pdf",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-02-13",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-29375",
+          "got": "sINV29375"
+        }
+      }
+    },
+    {
+      "doc": "inv-053_skewed_scan.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Lakshmi Devi",
+          "got": "LalshmiDevi"
+        },
+        "hospital_name": {
+          "expected": "Sunrise Eye Care",
+          "got": "None"
+        },
+        "amount": {
+          "expected": 21590.0,
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "RC-19338",
+          "got": "AC-293998-"
+        },
+        "category": {
+          "expected": "Diagnostics",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-055_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Priya Nair",
+          "got": "None"
+        },
+        "claim_date": {
+          "expected": "2026-04-18",
+          "got": "2026-04-16"
+        }
+      }
+    },
+    {
+      "doc": "inv-058_scanned_pdf.pdf",
+      "wrong": {
+        "patient_name": {
+          "expected": "Anita Sharma",
+          "got": "Anite Sharma"
+        }
+      }
+    },
+    {
+      "doc": "inv-061_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Divya Rao",
+          "got": "DivyaRao"
+        },
+        "claim_date": {
+          "expected": "2026-03-17",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-065_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sri Sai Nursing Home",
+          "got": "Sti Sal Nursing Home"
+        },
+        "claim_date": {
+          "expected": "2026-03-09",
+          "got": "2026-03-08"
+        },
+        "invoice_number": {
+          "expected": "BL-58003",
+          "got": "BL-S8003"
+        }
+      }
+    },
+    {
+      "doc": "inv-067_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Lakshmi Devi",
+          "got": "LakshmiDevi"
+        },
+        "invoice_number": {
+          "expected": "BL-59698",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-070_scanned_pdf.pdf",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-07-09",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-071_skewed_scan.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Santhosh Kumar",
+          "got": "Santhosh Kumar BOS"
+        },
+        "hospital_name": {
+          "expected": "Fortis Healthcare",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-2961",
+          "got": "None"
+        },
+        "category": {
+          "expected": "Accident",
+          "got": "Orthopedic"
+        }
+      }
+    },
+    {
+      "doc": "inv-073_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Kavya Menon",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-076_scanned_pdf.pdf",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sri Sai Nursing Home",
+          "got": "Sri Sal Nursing Home"
+        }
+      }
+    },
+    {
+      "doc": "inv-077_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Manipal Hospital",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "RC-33970",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-079_phone_photo.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sri Sai Nursing Home",
+          "got": "Sri Sal Nursing Home"
+        },
+        "invoice_number": {
+          "expected": "INV-80781",
+          "got": "INV-6078L"
+        }
+      }
+    },
+    {
+      "doc": "inv-082_scanned_pdf.pdf",
+      "wrong": {
+        "patient_name": {
+          "expected": "Santhosh Kumar",
+          "got": "Santhosh Kuntar"
+        },
+        "category": {
+          "expected": "Diagnostics",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-088_scanned_pdf.pdf",
+      "wrong": {
+        "amount": {
+          "expected": 49110.0,
+          "got": "None"
+        },
+        "claim_date": {
+          "expected": "2026-07-10",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-80392",
+          "got": "INV-60392"
+        },
+        "category": {
+          "expected": "Diagnostics",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-089_skewed_scan.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Vikram Singh",
+          "got": "None"
+        },
+        "claim_date": {
+          "expected": "2026-05-08",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-46435",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-091_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Anita Sharma",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-094_scanned_pdf.pdf",
+      "wrong": {
+        "hospital_name": {
+          "expected": "City Care Dental Clinic",
+          "got": "None"
+        },
+        "claim_date": {
+          "expected": "2026-05-06",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-42387",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-095_skewed_scan.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Divya Rao",
+          "got": "Divya Rac"
+        },
+        "hospital_name": {
+          "expected": "Manipal Hospital",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-097_phone_photo.jpg",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-10-16",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-60279",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-100_scanned_pdf.pdf",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-01-16",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-101_skewed_scan.jpg",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-01-15",
+          "got": "2026-02-15"
+        },
+        "invoice_number": {
+          "expected": "BL-51630",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-103_phone_photo.jpg",
+      "wrong": {
+        "amount": {
+          "expected": 69270.0,
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-106_scanned_pdf.pdf",
+      "wrong": {
+        "category": {
+          "expected": "Dermatology",
+          "got": "Opd"
+        }
+      }
+    },
+    {
+      "doc": "inv-107_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Lotus Diagnostics",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "INV-79854",
+          "got": "INV"
+        }
+      }
+    },
+    {
+      "doc": "inv-109_phone_photo.jpg",
+      "wrong": {
+        "claim_date": {
+          "expected": "2026-06-11",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-113_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Sunrise Eye Care",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "RC-83692",
+          "got": "None"
+        },
+        "category": {
+          "expected": "Diagnostics",
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-115_phone_photo.jpg",
+      "wrong": {
+        "patient_name": {
+          "expected": "Meena Iyer",
+          "got": "Meena"
+        },
+        "amount": {
+          "expected": 62030.0,
+          "got": "None"
+        }
+      }
+    },
+    {
+      "doc": "inv-119_skewed_scan.jpg",
+      "wrong": {
+        "hospital_name": {
+          "expected": "Lotus Diagnostics",
+          "got": "None"
+        },
+        "invoice_number": {
+          "expected": "BL-14443",
+          "got": "None"
+        }
+      }
+    }
+  ]
+}
