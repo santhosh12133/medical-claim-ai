@@ -179,11 +179,13 @@ def _extract_pdf_text(pdf_path: str | Path, enhanced: bool = False) -> str:
 
 # Preprocessing passes used for multi-pass OCR: (name, preprocess kwargs, tesseract page-segmentation mode).
 # psm 6 reads a single text block; psm 4 reads variable-size columns and recovers lines psm 6 drops on
-# noisy photos. A binarised pass was tried and removed: 3-100 s per page on noisy scans.
+# noisy photos. A binarised pass was tried and removed: 3-100 s per page on noisy scans. The despeckled
+# column pass recovers heavily speckled, skewed scans where both non-despeckled passes read little.
 OCR_PASSES = (
     ("standard", {"despeckle": False}, 6),
     ("despeckle", {"despeckle": True}, 6),
     ("columns", {"despeckle": False}, 4),
+    ("despeckle-columns", {"despeckle": True}, 4),
 )
 
 

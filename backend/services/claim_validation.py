@@ -27,7 +27,7 @@ PATIENT_PATTERN = re.compile(
 # Name-shaped phrase ending in a provider keyword ("Lakeview Medical Centre", "CITY CARE DENTAL CLINIC").
 # Capitalised words are matched case-sensitively so OCR junk around the name is not captured.
 HOSPITAL_PATTERN = re.compile(
-    r"(?P<name>(?:[A-Z][A-Za-z'&.]*[ \t]+){1,5}"
+    r"(?P<name>(?:[A-Z][A-Za-z'&.]*[:;,]?[ \t]+){1,5}"
     r"(?i:hospitals?|clinic|nursing[ \t]+home|medical[ \t]+cent(?:re|er)|healthcare|diagnostics|polyclinic"
     r"|laborator(?:y|ies)|labs|pharmacy|medicals|eye[ \t]+care|dental[ \t]+care))\b"
 )
@@ -246,7 +246,8 @@ def extract_structured(text: str) -> Dict[str, Any]:
         category = item_categories[0] if item_categories else (entities["categories"][0] if entities["categories"] else None)
     fields = {
         "patient_name": _clean_name(patient_match.group(1)) if patient_match else None,
-        "hospital_name": " ".join(hospital_match.group("name").split())[:100] if hospital_match else None,
+        "hospital_name": " ".join(re.sub(r"[:;,](?=\s)", "", hospital_match.group("name")).split())[:100]
+        if hospital_match else None,
         "treatment": treatment,
         "policy_category": category,
         "amount": amount,
@@ -295,6 +296,7 @@ def extract_structured_multi(texts: list[str]) -> Dict[str, Any]:
     base = max(results, key=lambda result: sum(1 for value in result["fields"].values() if value is not None))
     merged = {**base, "fields": dict(base["fields"]), "confidence": dict(base["confidence"])}
     agreement: dict[str, float] = {}
+    completeness = [sum(1 for value in result["fields"].values() if value is not None) for result in results]
     for name in _VOTED_FIELDS:
         candidates = [(index, result["fields"].get(name)) for index, result in enumerate(results)
                       if result["fields"].get(name) is not None]
@@ -303,7 +305,7 @@ def extract_structured_multi(texts: list[str]) -> Dict[str, Any]:
         votes: dict[str, list[int]] = {}
         for index, value in candidates:
             votes.setdefault(_vote_key(value), []).append(index)
-        winner = max(votes.values(), key=lambda indexes: (len(indexes), -indexes[0]))
+        winner = max(votes.values(), key=lambda indexes: _vote_rank(name, indexes, results, completeness))
         merged["fields"][name] = results[winner[0]]["fields"][name]
         merged["confidence"][name] = results[winner[0]]["confidence"].get(name, 0.0)
         agreement[name] = round(len(winner) / len(results), 3)
@@ -316,6 +318,25 @@ def extract_structured_multi(texts: list[str]) -> Dict[str, Any]:
     merged["critical_disagreements"] = _critical_disagreements(results)
     merged["ocr_passes"] = len(results)
     return merged
+
+
+def _vote_rank(name: str, indexes: list[int], results: list[Dict[str, Any]], completeness: list[int]) -> tuple:
+    """Rank a group of passes that read the same value.
+
+    Amounts consistent with the bill's own line items win first (OCR often drops a decimal point:
+    43,530.00 -> 4353000). Then more votes, then the most complete pass (noisy scans make some passes
+    read almost nothing), then the earliest pass.
+    """
+    consistent = 0
+    if name == "amount":
+        value = float(results[indexes[0]]["fields"]["amount"])
+        consistent = int(any(_items_total_matches(results[index], value) for index in range(len(results))))
+    return (consistent, len(indexes), max(completeness[index] for index in indexes), -indexes[0])
+
+
+def _items_total_matches(result: Dict[str, Any], amount: float) -> bool:
+    items = [item for item in result.get("line_items", []) if item.get("amount") is not None]
+    return len(items) >= 2 and abs(sum(float(item["amount"]) for item in items) - amount) <= 1.0
 
 
 def _critical_disagreements(results: list[Dict[str, Any]]) -> list[str]:
