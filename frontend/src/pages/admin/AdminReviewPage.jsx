@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from '../../api';
+import { ExtractedFields } from '../../components/ClaimViews';
 import { EvidencePanel } from '../../components/EvidencePanel';
-import { SectionCard } from '../../components/SectionCard';
-import { FlagList, errorMessage, formatMoney, statusClass } from '../../components/ui';
-
-const PENDING_STATUSES = new Set(['Pending', 'Pending Review', 'Needs Attention', 'Processing']);
+import { Icon } from '../../components/Icon';
+import {
+  EmptyState, FlagList, PageHeader, Panel, Stamp, StatusBadge, Toast, errorMessage, formatDate, formatMoney,
+} from '../../components/ui';
+import { OPEN_STATUSES } from '../../layouts/AdminLayout';
 
 const auditToVerification = (audit) => ({
   status: audit.decision,
@@ -23,7 +25,17 @@ const auditToVerification = (audit) => ({
   confidence_breakdown: {},
 });
 
-function AgentTrace({ claimId, refreshKey }) {
+const TOOL_NAMES = {
+  run_ocr: 'Read the bill',
+  extract_fields: 'Extracted the details',
+  infer_treatment: 'Worked out the treatment',
+  check_risks: 'Checked for red flags',
+  verify_policy: 'Checked the policy',
+  escalate_to_human: 'Sent to a reviewer',
+  complete: 'Finished',
+};
+
+function AgentSteps({ claimId, refreshKey }) {
   const [run, setRun] = useState(null);
 
   useEffect(() => {
@@ -37,15 +49,16 @@ function AgentTrace({ claimId, refreshKey }) {
 
   if (!run?.steps?.length) return null;
   return (
-    <details className="evidence__details" open>
-      <summary>Agent trace · {run.outcome}{run.escalation_reason ? ` — ${run.escalation_reason}` : ''} · planner: {run.planner}</summary>
-      <ol className="trace">
+    <details className="disclosure">
+      <summary>How this claim was processed ({run.steps.length} steps{run.planner === 'llm' ? ', planned by AI' : ''})</summary>
+      {run.escalation_reason ? <p className="disclosure__lead">Sent for review: {run.escalation_reason}</p> : null}
+      <ol className="steps">
         {run.steps.map((step) => (
-          <li key={step.step}>
-            <strong>{step.tool}</strong>{Object.keys(step.args || {}).length ? ` ${JSON.stringify(step.args)}` : ''}
-            {' — '}<span className="muted-text">{step.rationale}</span>
-            {step.status === 'error' ? <span className="error-text"> (failed after {step.attempts} attempts)</span> : null}
-            {step.attempts > 1 && step.status !== 'error' ? <span className="muted-text"> (succeeded on attempt {step.attempts})</span> : null}
+          <li key={step.step} className={step.status === 'error' ? 'steps__item--failed' : ''}>
+            <strong>{TOOL_NAMES[step.tool] || step.tool}</strong>
+            <span>{step.rationale}</span>
+            {step.status === 'error' ? <span className="steps__note">Failed after {step.attempts} attempts</span> : null}
+            {step.attempts > 1 && step.status !== 'error' ? <span className="steps__note">Succeeded on attempt {step.attempts}</span> : null}
           </li>
         ))}
       </ol>
@@ -60,16 +73,14 @@ function ReviewCard({ claim, onChanged, notify }) {
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
 
-  const recommended = claim.policy_decision && ['Approved', 'Partially Approved'].includes(claim.policy_decision)
-    ? claim.policy_approved_amount
-    : claim.amount;
+  const recommended = ['Approved', 'Partially Approved'].includes(claim.policy_decision) ? claim.policy_approved_amount : claim.amount;
 
   const loadLatestAudit = useCallback(async () => {
     try {
       const response = await api.get(`/rag/claims/${claim.id}/verifications`);
       if (response.data.length) setVerification(auditToVerification(response.data[0]));
     } catch {
-      /* no audit yet */
+      /* no policy check yet */
     }
   }, [claim.id]);
 
@@ -80,101 +91,115 @@ function ReviewCard({ claim, onChanged, notify }) {
   const run = async (label, request, success) => {
     setBusy(label);
     try {
-      const response = await request();
-      success(response);
+      success(await request());
     } catch (actionError) {
-      notify('rejected', `${label} failed`, errorMessage(actionError));
+      notify('error', `${label} didn’t work`, errorMessage(actionError));
     } finally {
       setBusy('');
     }
   };
 
-  const verify = () => run('Policy verification', () => api.post(`/rag/claims/${claim.id}/verify`), (response) => {
+  const recheck = () => run('Policy check', () => api.post(`/rag/claims/${claim.id}/verify`), (response) => {
     setVerification(response.data);
     setOpen(true);
-    notify(response.data.status === 'Rejected' ? 'rejected' : 'approved', 'Policy verification complete',
-      `${response.data.status}: ${response.data.reason}`);
-    onChanged(false);
+    notify('success', 'Policy checked again', `${response.data.status}. ${response.data.reason}`);
+    onChanged();
   });
 
   const approve = () => run('Approval', () => api.patch(`/claims/${claim.id}/approve`, {
     approved_amount: amount ? Number(amount) : undefined,
     notes: notes || undefined,
   }), (response) => {
-    notify('approved', response.data.message, `Claim #${claim.id} for ${formatMoney(response.data.claim.final_approved_amount)}`);
-    onChanged(true);
+    notify('success', `Claim #${claim.id} approved`, `${formatMoney(response.data.claim.final_approved_amount)} for ${claim.employee_name}.`);
+    onChanged();
   });
 
   const reject = () => run('Rejection', () => api.patch(`/claims/${claim.id}/reject`, { notes: notes || undefined }), () => {
-    notify('rejected', 'Claim rejected', `Claim #${claim.id} was rejected.`);
-    onChanged(true);
+    notify('success', `Claim #${claim.id} rejected`, notes ? `Reason sent: ${notes}` : 'No reason was added.');
+    onChanged();
   });
 
-  const reprocess = () => run('Reprocess', () => api.post(`/claims/${claim.id}/reprocess`), () => {
-    notify('approved', 'Claim re-queued', 'OCR and policy verification will run again shortly.');
-    onChanged(false);
+  const reprocess = () => run('Re-reading', () => api.post(`/claims/${claim.id}/reprocess`), () => {
+    notify('success', `Claim #${claim.id} is being read again`, 'The bill will be read and checked again in a moment.');
+    onChanged();
   });
 
-  const viewDocument = () => run('Document download', () => api.get(`/claims/${claim.id}/document`, { responseType: 'blob' }),
-    (response) => {
-      const url = URL.createObjectURL(response.data);
-      window.open(url, '_blank', 'noopener');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    });
+  const viewBill = () => run('Opening the bill', () => api.get(`/claims/${claim.id}/document`, { responseType: 'blob' }), (response) => {
+    const url = URL.createObjectURL(response.data);
+    window.open(url, '_blank', 'noopener');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  });
 
   const processing = ['queued', 'processing'].includes(claim.processing_status);
 
   return (
-    <article className="review-card">
+    <article className={`review-card ${claim.risk_flags_json?.length ? 'review-card--flagged' : ''}`}>
       <div className="review-card__head">
-        <div>
-          <p className="eyebrow">Claim #{claim.id} · {claim.policy_category || 'Uncategorised'}</p>
-          <h3>{claim.employee_name} — {claim.treatment || 'Treatment not read'}</h3>
-          <p className="muted-text">
-            {claim.hospital_name || 'Unknown hospital'} · {claim.claim_date || 'no date'} · claimed {formatMoney(claim.amount)}
-            {claim.patient_name ? ` · patient ${claim.patient_name}` : ''}
+        <div className="review-card__who">
+          <h3>{claim.employee_name}</h3>
+          <p>{processing && !claim.treatment ? 'New claim' : `${claim.treatment || 'Treatment not read'}, ${claim.hospital_name || 'hospital not read'}`}</p>
+          <p className="review-card__facts">
+            <span>Claim #{claim.id}</span>
+            {claim.claim_date ? <span>Bill dated {formatDate(claim.claim_date)}</span> : null}
+            {claim.amount != null ? <span className="num">{formatMoney(claim.amount)} claimed</span> : null}
+            {processing ? <span>The bill is still being read</span> : null}
           </p>
           <FlagList flags={claim.risk_flags_json} />
-          {claim.processing_error ? <p className="error-text">{claim.processing_error}</p> : null}
+          {claim.processing_error ? <p className="form-error"><Icon name="alert" size={16} />{claim.processing_error}</p> : null}
         </div>
-        <div className="review-card__status">
-          <span className={statusClass(claim.status)}>{claim.status}</span>
+        <div className="review-card__verdict">
           {claim.policy_decision ? (
-            <span className="muted-text">AI: {claim.policy_decision} {formatMoney(claim.policy_approved_amount)}</span>
-          ) : <span className="muted-text">{claim.validation_message || 'Not verified'}</span>}
+            <>
+              <span className="review-card__verdict-label">Policy check recommends</span>
+              <Stamp status={claim.policy_decision} amount={claim.policy_approved_amount} compact />
+            </>
+          ) : <StatusBadge status={claim.status} />}
         </div>
       </div>
 
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={() => setOpen((value) => !value)}>{open ? 'Hide details' : 'Review details'}</button>
-        <button type="button" className="secondary" onClick={verify} disabled={Boolean(busy) || processing || !claim.treatment}>
-          {busy === 'Policy verification' ? 'Verifying…' : claim.policy_decision ? 'Re-verify policy' : 'Verify policy'}
+      <div className="review-card__actions">
+        <button type="button" className="button button--secondary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+          {open ? 'Hide details' : 'Review details'}
         </button>
-        <button type="button" className="secondary" onClick={viewDocument} disabled={Boolean(busy)}>View bill</button>
-        <button type="button" className="secondary" onClick={reprocess} disabled={Boolean(busy) || processing}>Reprocess</button>
+        <button type="button" className="button button--ghost" onClick={viewBill} disabled={Boolean(busy)}><Icon name="file" />View bill</button>
+        <button type="button" className="button button--ghost" onClick={recheck} disabled={Boolean(busy) || processing || !claim.treatment}>
+          <Icon name="policies" />{busy === 'Policy check' ? 'Checking…' : 'Re-check policy'}
+        </button>
+        <button type="button" className="button button--ghost" onClick={reprocess} disabled={Boolean(busy) || processing}>
+          <Icon name="refresh" />Re-read bill
+        </button>
       </div>
 
       {open ? (
         <div className="review-card__body">
-          <AgentTrace claimId={claim.id} refreshKey={claim.updated_at} />
-          {claim.declared_amount != null && claim.amount != null ? (
-            <p className="muted-text">Declared {formatMoney(claim.declared_amount)} · bill total read as {formatMoney(claim.amount)}</p>
+          <ExtractedFields claim={claim} />
+          {claim.declared_amount != null && claim.amount != null && Number(claim.declared_amount) !== Number(claim.amount) ? (
+            <p className="note">The employee entered {formatMoney(claim.declared_amount)}; the bill total reads {formatMoney(claim.amount)}.</p>
           ) : null}
-          {verification ? <EvidencePanel verification={verification} /> : <p className="hint">No policy verification yet. Run “Verify policy” to retrieve evidence.</p>}
+          {verification ? <EvidencePanel verification={verification} />
+            : <p className="hint">This claim hasn’t been checked against a policy yet. Use “Re-check policy” to run it.</p>}
+          <AgentSteps claimId={claim.id} refreshKey={claim.updated_at} />
+
           <div className="decision-form">
-            <label>
-              Approved amount
-              <input type="number" min="1" step="0.01" placeholder={recommended ? `Recommended ${recommended}` : 'Full amount'}
-                value={amount} onChange={(event) => setAmount(event.target.value)} />
-            </label>
-            <label>
-              Reviewer notes
-              <input type="text" maxLength={2000} placeholder="Reason for the decision (shown in the audit trail)"
-                value={notes} onChange={(event) => setNotes(event.target.value)} />
-            </label>
+            <h4>Your decision</h4>
+            <div className="form-row">
+              <label className="field">
+                <span className="field__label">Amount to reimburse</span>
+                <input type="number" inputMode="decimal" min="1" step="0.01" value={amount}
+                  placeholder={recommended != null ? `${formatMoney(recommended)} recommended` : 'Full bill amount'}
+                  onChange={(event) => setAmount(event.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field__label">Note to the employee <span className="field__optional">optional</span></span>
+                <input type="text" maxLength={2000} value={notes} placeholder="Shown to the employee and kept in the audit trail"
+                  onChange={(event) => setNotes(event.target.value)} />
+              </label>
+            </div>
             <div className="button-row">
-              <button type="button" onClick={approve} disabled={Boolean(busy) || processing}>Approve</button>
-              <button type="button" className="secondary danger" onClick={reject} disabled={Boolean(busy) || processing}>Reject</button>
+              <button type="button" className="button button--primary" onClick={approve} disabled={Boolean(busy) || processing}>
+                <Icon name="check" />Approve
+              </button>
+              <button type="button" className="button button--danger" onClick={reject} disabled={Boolean(busy) || processing}>Reject</button>
             </div>
           </div>
         </div>
@@ -184,47 +209,53 @@ function ReviewCard({ claim, onChanged, notify }) {
 }
 
 export function AdminReviewPage() {
-  const [claims, setClaims] = useState([]);
+  const [claims, setClaims] = useState(null);
   const [toast, setToast] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
 
-  const loadClaims = useCallback(async () => {
+  const load = useCallback(async () => {
     const response = await api.get('/claims');
-    setClaims(response.data.filter((claim) => PENDING_STATUSES.has(claim.status)));
+    setClaims(response.data.filter((claim) => OPEN_STATUSES.has(claim.status)));
   }, []);
 
-  useEffect(() => {
-    loadClaims().catch(() => setClaims([])).finally(() => setLoading(false));
-  }, [loadClaims]);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 3500);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+  useEffect(() => { load().catch(() => setClaims([])); }, [load]);
 
   const notify = (type, title, message) => setToast({ type, title, message });
-  const onChanged = () => loadClaims().catch(() => undefined);
-
-  const flagged = claims.filter((claim) => claim.risk_flags_json?.length).length;
+  const closeToast = useCallback(() => setToast(null), []);
+  const list = claims || [];
+  const flagged = list.filter((claim) => claim.risk_flags_json?.length);
+  const shown = onlyFlagged ? flagged : list;
 
   return (
-    <SectionCard title="Review Queue" subtitle={`${claims.length} open · ${flagged} flagged`}>
-      {toast ? (
-        <div className={`toast toast--${toast.type}`} role="status" aria-live="polite">
-          <div className="toast__icon">{toast.type === 'approved' ? '✓' : '!'}</div>
-          <div className="toast__content">
-            <p className="toast__title">{toast.title}</p>
-            <p className="toast__message">{toast.message}</p>
+    <>
+      <PageHeader title="Review queue"
+        description="Claims the automatic checks couldn’t settle on their own. Each one shows why." />
+      <Toast toast={toast} onClose={closeToast} />
+
+      <Panel title={null}>
+        <div className="toolbar">
+          <div className="segmented" role="tablist" aria-label="Filter the queue">
+            <button type="button" role="tab" aria-selected={!onlyFlagged}
+              className={`segmented__option ${!onlyFlagged ? 'segmented__option--active' : ''}`} onClick={() => setOnlyFlagged(false)}>
+              All waiting <span className="segmented__count">{list.length}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={onlyFlagged}
+              className={`segmented__option ${onlyFlagged ? 'segmented__option--active' : ''}`} onClick={() => setOnlyFlagged(true)}>
+              Red flags <span className="segmented__count">{flagged.length}</span>
+            </button>
           </div>
-          <button type="button" className="toast__close" onClick={() => setToast(null)} aria-label="Close notification">×</button>
         </div>
-      ) : null}
-      <div className="stack">
-        {loading ? <p className="hint">Loading claims…</p> : null}
-        {!loading && !claims.length ? <p className="hint">The review queue is empty.</p> : null}
-        {claims.map((claim) => <ReviewCard key={claim.id} claim={claim} onChanged={onChanged} notify={notify} />)}
-      </div>
-    </SectionCard>
+
+        {claims === null ? <p className="loading-line">Loading the queue…</p> : shown.length ? (
+          <div className="review-list">
+            {shown.map((claim) => <ReviewCard key={claim.id} claim={claim} onChanged={() => load().catch(() => undefined)} notify={notify} />)}
+          </div>
+        ) : (
+          <EmptyState icon="check" title={onlyFlagged ? 'No flagged claims' : 'Nothing to review'}>
+            {onlyFlagged ? 'Claims with red flags will appear here.' : 'New claims that need a reviewer will appear here.'}
+          </EmptyState>
+        )}
+      </Panel>
+    </>
   );
 }

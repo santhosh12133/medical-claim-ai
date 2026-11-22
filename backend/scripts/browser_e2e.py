@@ -5,10 +5,12 @@ Runs on the host against the stack started with ``docker compose``:
     pip install playwright && python -m playwright install --with-deps chromium
     python backend/scripts/browser_e2e.py --frontend http://localhost:8080 --bill browser_bill.png --out browser-e2e
 
-Flow: employee signs in, uploads a bill, watches it get processed, opens the claim status page and asks
-the Coverage Assistant a question; admin signs in, opens the dashboard, the review queue (with evidence),
-the policies page and the retrieval debugger. Fails on any browser page error, failed API call (HTTP 5xx)
-or missing UI element. Screenshots of every step are written to ``--out``.
+Flow: a wrong password is refused with a clear message; the employee signs in (one sign-in page for every
+role), uploads a bill, watches it get processed and stamped, opens My claims (via the old status address) and
+asks a coverage question; the reviewer signs in, opens the overview, all claims, the review queue (with
+evidence), approves a claim, and uses the policies page and search test. Mobile layouts are checked too.
+Fails on any browser page error, failed API call (HTTP 5xx) or missing UI element. Screenshots of every step
+are written to ``--out``.
 """
 
 from __future__ import annotations
@@ -48,34 +50,49 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
 
-        # ---------------------------------------------------------------- employee
+        # ---------------------------------------------------------------- sign in
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         watch(page)
-        page.goto(f"{frontend}/employee/login")
+        page.goto(f"{frontend}/login")
         expect(page.locator('input[type="password"]')).to_have_value("")  # no pre-filled demo password
-        step(page, "employee-login-page-empty")
+        page.locator("input").first.fill("nobody@example.com")
+        page.locator('input[type="password"]').fill("not-the-password")
+        page.get_by_role("button", name="Sign in").click()
+        expect(page.locator(".form-error")).to_contain_text("don’t match", timeout=10_000)
+        step(page, "sign-in-rejects-wrong-password")
+
+        # ---------------------------------------------------------------- employee
         sign_in(page, "employee", os.getenv("E2E_EMPLOYEE_EMAIL", "employee@demo.com"),
                 os.getenv("E2E_EMPLOYEE_PASSWORD", "employee123"))
-        step(page, "employee-dashboard")
+        expect(page.locator(".metric-card").first).to_be_visible()
+        step(page, "employee-overview")
 
         page.goto(f"{frontend}/employee/upload")
         page.locator('input[type="file"]').set_input_files(str(bill))
-        page.get_by_role("button", name="Upload & submit claim").click()
+        page.get_by_role("button", name="Submit claim").click()
         expect(page.locator(".result-heading strong")).to_be_visible(timeout=20_000)
         step(page, "employee-upload-queued")
         # "Claim #N is being processed" -> "Claim #N processed" once the worker has finished
         expect(page.locator(".result-heading strong")).to_have_text(re.compile(r"Claim #\d+ processed"), timeout=timeout_ms)
         expect(page.locator(".detail-grid")).to_contain_text("7,000")
+        expect(page.locator(".outcome .stamp")).to_be_visible()
         step(page, "employee-upload-processed")
 
-        page.goto(f"{frontend}/employee/status")
+        page.goto(f"{frontend}/employee/status")  # old address: now redirects to My claims
+        page.wait_for_url("**/employee/claims", timeout=10_000)
         expect(page.get_by_text("Root canal treatment").first).to_be_visible(timeout=20_000)
-        step(page, "employee-claim-status")
+        expect(page.locator(".claim-item__detail .timeline")).to_be_visible()
+        step(page, "employee-my-claims")
 
         page.goto(f"{frontend}/employee/assistant")
         page.locator(".chip").first.click()
         expect(page.locator(".answer .citation").first).to_be_visible(timeout=60_000)
-        step(page, "employee-coverage-assistant")
+        step(page, "employee-coverage-questions")
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(f"{frontend}/employee/claims")
+        expect(page.locator(".claim-row").first).to_be_visible(timeout=20_000)
+        step(page, "employee-my-claims-mobile")
         page.close()
 
         # ------------------------------------------------------------------- admin
@@ -83,7 +100,11 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
         watch(page)
         sign_in(page, "admin", os.getenv("E2E_ADMIN_EMAIL", "admin@demo.com"), os.getenv("E2E_ADMIN_PASSWORD", "admin123"))
         expect(page.locator(".metric-card").first).to_be_visible()
-        step(page, "admin-dashboard")
+        step(page, "admin-overview")
+
+        page.goto(f"{frontend}/admin/claims")
+        expect(page.locator("table.claims-table tbody tr").first).to_be_visible(timeout=20_000)
+        step(page, "admin-all-claims")
 
         page.goto(f"{frontend}/admin/review")
         card = page.locator(".review-card").first
@@ -91,18 +112,22 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
         card.get_by_role("button", name="Review details").click()
         expect(card.locator(".evidence, .hint").first).to_be_visible(timeout=20_000)
         step(page, "admin-review-queue")
+        card.get_by_role("button", name="Approve").click()
+        expect(page.locator(".toast")).to_contain_text("approved", timeout=20_000)
+        step(page, "admin-approves-claim")
 
         page.goto(f"{frontend}/admin/policies")
         expect(page.locator("table.claims-table tbody tr").first).to_be_visible(timeout=20_000)
         page.fill('input[aria-label="Retrieval test query"]', "root canal limit")
-        page.get_by_role("button", name="Search").click()
-        expect(page.get_by_text("Dental Care Reimbursement Policy").first).to_be_visible(timeout=60_000)
-        step(page, "admin-policies-and-retrieval-debugger")
+        page.get_by_role("button", name="Search", exact=True).click()
+        first_hit = page.locator(".search-test .citation").first
+        expect(first_hit).to_contain_text("Dental Care Reimbursement Policy", timeout=60_000)
+        step(page, "admin-policies-and-search-test")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        page.goto(f"{frontend}/admin/review")
-        expect(page.locator(".review-card").first).to_be_visible(timeout=20_000)
-        step(page, "admin-review-mobile")
+        page.goto(f"{frontend}/admin/claims")
+        expect(page.locator("table.claims-table").first).to_be_visible(timeout=20_000)
+        step(page, "admin-all-claims-mobile")
         browser.close()
 
     return {"steps_passed": steps, "problems": problems}

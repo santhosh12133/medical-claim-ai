@@ -2,50 +2,69 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { api } from '../../api';
-import { SectionCard } from '../../components/SectionCard';
+import { useAuth } from '../../auth/AuthContext';
+import { ClaimRow } from '../../components/ClaimViews';
+import { Icon } from '../../components/Icon';
+import { EmptyState, PageHeader, Panel, formatMoney, isFinal } from '../../components/ui';
+
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export function EmployeeDashboardPage() {
-  const [claims, setClaims] = useState([]);
+  const { user } = useAuth();
+  const [claims, setClaims] = useState(null);
 
   useEffect(() => {
     api.get('/claims').then((response) => setClaims(response.data)).catch(() => setClaims([]));
   }, []);
 
-  const approvedStatuses = new Set(['Approved', 'Partially Approved']);
-  const pendingClaims = claims.filter((claim) => !approvedStatuses.has(claim.status) && claim.status !== 'Rejected').length;
-  const approvedClaims = claims.filter((claim) => approvedStatuses.has(claim.status)).length;
-  const approvedAmount = claims
-    .filter((claim) => approvedStatuses.has(claim.status))
-    .reduce((total, claim) => total + Number(claim.final_approved_amount ?? claim.amount ?? 0), 0);
+  const list = claims || [];
+  const approved = list.filter((claim) => ['Approved', 'Partially Approved'].includes(claim.status));
+  const inProgress = list.filter((claim) => !isFinal(claim.status)).length;
+  const reimbursed = approved.reduce((total, claim) => total + Number(claim.final_approved_amount ?? 0), 0);
+  const firstName = String(user?.full_name || '').split(' ')[0];
 
   return (
     <>
-      <section className="card dashboard-welcome">
-        <div>
-          <p className="eyebrow">Claims at a glance</p>
-          <h2>Welcome back</h2>
-          <p className="hero-copy">Submit a medical bill and let OCR, policy retrieval and AI-assisted validation do the heavy lifting.</p>
-        </div>
-        <Link className="button-primary nav-button" to="/employee/upload">+ New claim</Link>
-      </section>
+      <PageHeader
+        title={`${greeting()}${firstName ? `, ${firstName}` : ''}`}
+        description="Submit a hospital bill or check where your claims stand."
+        actions={<Link className="button button--primary" to="/employee/upload"><Icon name="submit" />Submit a bill</Link>}
+      />
 
-      <SectionCard title="My Claim Overview" subtitle="Live account summary">
-        <div className="dashboard-grid">
-          <article className="metric-card"><p className="eyebrow">Total claims</p><h3>{claims.length}</h3><p className="metric-label">All submissions</p></article>
-          <article className="metric-card"><p className="eyebrow">In review</p><h3>{pendingClaims}</h3><p className="metric-label">Awaiting a decision</p></article>
-          <article className="metric-card"><p className="eyebrow">Approved</p><h3>{approvedClaims}</h3><p className="metric-label">Successful claims</p></article>
-          <article className="metric-card"><p className="eyebrow">Approved value</p><h3>₹{approvedAmount.toLocaleString('en-IN')}</h3><p className="metric-label">Amount reimbursed</p></article>
-        </div>
-      </SectionCard>
+      <dl className="figures">
+        <div className="metric-card"><dt>Claims submitted</dt><dd>{list.length}</dd></div>
+        <div className="metric-card"><dt>In progress</dt><dd>{inProgress}</dd></div>
+        <div className="metric-card"><dt>Approved</dt><dd>{approved.length}</dd></div>
+        <div className="metric-card"><dt>Reimbursed</dt><dd>{formatMoney(reimbursed)}</dd></div>
+      </dl>
 
-      <SectionCard title="What happens next?" subtitle="Simple, transparent workflow">
-        <div className="workflow-grid">
-          <div><span className="workflow-step">01</span><strong>Upload</strong><p>Send your bill as a PDF or image.</p></div>
-          <div><span className="workflow-step">02</span><strong>Extract</strong><p>OCR reads the hospital, treatment and amount.</p></div>
-          <div><span className="workflow-step">03</span><strong>Verify</strong><p>Policy evidence is retrieved and evaluated.</p></div>
-          <div><span className="workflow-step">04</span><strong>Track</strong><p>Follow the decision from your claims page.</p></div>
-        </div>
-      </SectionCard>
+      <div className="split">
+        <Panel title="Recent claims" actions={list.length ? <Link className="text-link" to="/employee/claims">See all claims</Link> : null}>
+          {claims === null ? <p className="loading-line">Loading claims…</p> : list.length ? (
+            <div className="claim-list">
+              {list.slice(0, 5).map((claim) => <ClaimRow key={claim.id} claim={claim} />)}
+            </div>
+          ) : (
+            <EmptyState title="No claims yet" action={<Link className="button button--primary" to="/employee/upload">Submit your first bill</Link>}>
+              Upload a hospital bill as a PDF or photo. You’ll see the result here.
+            </EmptyState>
+          )}
+        </Panel>
+
+        <Panel title="How claims are decided" className="panel--quiet">
+          <ol className="process">
+            <li><strong>You upload the bill.</strong> A PDF, scan or clear photo, up to 10 MB.</li>
+            <li><strong>It’s read and checked.</strong> The hospital, date, treatment and total are matched to your reimbursement policy.</li>
+            <li><strong>It’s decided.</strong> Straightforward claims are approved or rejected straight away. If something needs a second look, a reviewer decides.</li>
+          </ol>
+          <p className="panel__footnote">Not sure a treatment is covered? <Link to="/employee/assistant">Ask a coverage question</Link>.</p>
+        </Panel>
+      </div>
     </>
   );
 }

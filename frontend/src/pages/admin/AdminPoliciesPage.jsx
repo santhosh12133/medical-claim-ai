@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '../../api';
-import { SectionCard } from '../../components/SectionCard';
-import { errorMessage, statusClass } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { EmptyState, PageHeader, Panel, StatusBadge, Toast, errorMessage, formatDate } from '../../components/ui';
 
 const EMPTY_FORM = {
-  title: '',
-  policy_type: '',
-  policy_version: '1.0',
-  department: 'Medical',
-  effective_from: '',
-  effective_to: '',
-  supersede_previous: true,
+  title: '', policy_type: '', policy_version: '1.0', department: 'Medical', effective_from: '', effective_to: '', supersede_previous: true,
 };
 
-function PolicyUpload({ categories, onUploaded }) {
+function PolicyUpload({ categories, onUploaded, notify }) {
   const inputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [message, setMessage] = useState(null);
+  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const update = (key) => (event) => {
@@ -28,109 +22,119 @@ function PolicyUpload({ categories, onUploaded }) {
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!file) {
-      setMessage({ type: 'error', text: 'Choose a policy PDF first.' });
-      return;
-    }
+    setError('');
+    if (!file) { setError('Choose the policy PDF first.'); return; }
     const data = new FormData();
     data.append('file', file);
-    Object.entries(form).forEach(([key, value]) => {
-      if (value !== '' && value !== null) data.append(key, String(value));
-    });
+    Object.entries(form).forEach(([key, value]) => { if (value !== '' && value !== null) data.append(key, String(value)); });
     setSubmitting(true);
-    setMessage(null);
     try {
       const response = await api.post('/rag/policies/ingest', data);
-      const superseded = response.data.superseded_document_ids?.length
-        ? ` Archived previous version(s): #${response.data.superseded_document_ids.join(', #')}.`
-        : '';
-      setMessage({ type: 'success', text: `Indexed “${response.data.title}” into ${response.data.chunk_count} chunks.${superseded}` });
+      const archived = response.data.superseded_document_ids?.length
+        ? ` Older version${response.data.superseded_document_ids.length > 1 ? 's' : ''} archived.` : '';
+      notify('success', `“${response.data.title}” added`, `Split into ${response.data.chunk_count} searchable passages.${archived}`);
       setFile(null);
       setForm(EMPTY_FORM);
       if (inputRef.current) inputRef.current.value = '';
       onUploaded();
     } catch (uploadError) {
-      setMessage({ type: 'error', text: errorMessage(uploadError, 'Policy upload failed.') });
+      setError(errorMessage(uploadError, 'The policy could not be added.'));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <form className="policy-form" onSubmit={submit}>
-      <label className="policy-form__file">
-        Policy PDF
+    <form className="form" onSubmit={submit}>
+      <label className="field">
+        <span className="field__label">Policy PDF</span>
         <input ref={inputRef} type="file" accept=".pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} />
       </label>
-      <label>Title<input required minLength={3} value={form.title} onChange={update('title')} placeholder="Dental Care Reimbursement Policy" /></label>
-      <label>
-        Policy type
-        <input required list="policy-categories" value={form.policy_type} onChange={update('policy_type')} placeholder="Dental" />
-        <datalist id="policy-categories">{categories.map((name) => <option key={name} value={name} />)}</datalist>
-      </label>
-      <label>Version<input required value={form.policy_version} onChange={update('policy_version')} /></label>
-      <label>Department<input required value={form.department} onChange={update('department')} /></label>
-      <label>Effective from<input type="date" value={form.effective_from} onChange={update('effective_from')} /></label>
-      <label>Effective to<input type="date" value={form.effective_to} onChange={update('effective_to')} /></label>
+      <div className="form-row">
+        <label className="field"><span className="field__label">Title</span>
+          <input required minLength={3} value={form.title} onChange={update('title')} placeholder="Dental Care Reimbursement Policy" /></label>
+        <label className="field"><span className="field__label">Category</span>
+          <input required list="policy-categories" value={form.policy_type} onChange={update('policy_type')} placeholder="Dental" />
+          <datalist id="policy-categories">{categories.map((name) => <option key={name} value={name} />)}</datalist></label>
+      </div>
+      <div className="form-row form-row--4">
+        <label className="field"><span className="field__label">Version</span><input required value={form.policy_version} onChange={update('policy_version')} /></label>
+        <label className="field"><span className="field__label">Department</span><input required value={form.department} onChange={update('department')} /></label>
+        <label className="field"><span className="field__label">In force from</span><input type="date" value={form.effective_from} onChange={update('effective_from')} /></label>
+        <label className="field"><span className="field__label">Until</span><input type="date" value={form.effective_to} onChange={update('effective_to')} /></label>
+      </div>
       <label className="checkbox">
         <input type="checkbox" checked={form.supersede_previous} onChange={update('supersede_previous')} />
-        Archive older active versions of this policy type
+        Archive older active versions in this category
       </label>
-      <button type="submit" disabled={submitting}>{submitting ? 'Parsing, chunking & embedding…' : 'Upload & index policy'}</button>
-      {message ? <p className={message.type === 'error' ? 'error-text' : 'success-text'} role="status">{message.text}</p> : null}
+      {error ? <p className="form-error" role="alert"><Icon name="alert" size={16} />{error}</p> : null}
+      <div className="button-row">
+        <button type="submit" className="button button--primary" disabled={submitting}>{submitting ? 'Reading the policy…' : 'Add policy'}</button>
+      </div>
     </form>
   );
 }
 
-function RetrievalDebugger() {
+function SearchTest() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const search = async (event) => {
     event.preventDefault();
     if (query.trim().length < 2) return;
     setError('');
+    setLoading(true);
     try {
       const response = await api.post('/rag/search', { query: query.trim(), top_k: 8 });
       setResult(response.data);
     } catch (searchError) {
-      setError(errorMessage(searchError, 'Search failed.'));
+      setError(errorMessage(searchError, 'The search didn’t work. Try again.'));
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="stack">
-      <form className="toolbar toolbar--search" onSubmit={search}>
-        <input aria-label="Retrieval test query" placeholder="Try “root canal limit” or “MRI 30000”" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <button type="submit">Search</button>
+    <div className="search-test">
+      <form className="toolbar" onSubmit={search}>
+        <label className="search search--wide">
+          <Icon name="search" size={16} />
+          <input aria-label="Retrieval test query" placeholder="For example, root canal limit or MRI 30000" value={query}
+            onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <button type="submit" className="button button--secondary" disabled={loading}>Search</button>
       </form>
-      {error ? <p className="error-text">{error}</p> : null}
+      {error ? <p className="form-error" role="alert"><Icon name="alert" size={16} />{error}</p> : null}
       {result ? (
         <>
-          <p className="muted-text">
-            {result.diagnostics.mode} search · category {result.diagnostics.category || '—'} · {result.diagnostics.vector_candidates} vector /
-            {' '}{result.diagnostics.lexical_candidates} BM25 candidates · {result.diagnostics.latency_ms} ms
+          <p className="search-test__summary">
+            {result.hits.length} passages found in {result.diagnostics.latency_ms} ms
+            {result.diagnostics.category ? `, matched to the ${result.diagnostics.category} category` : ''}.
           </p>
-          <div className="table-wrap">
-            <table className="claims-table">
-              <thead><tr><th>#</th><th>Policy</th><th>Relevance</th><th>Vector</th><th>BM25</th><th>RRF</th><th>Rerank</th><th>Text</th></tr></thead>
-              <tbody>
-                {result.hits.map((hit, index) => (
-                  <tr key={hit.chunk_id}>
-                    <td>{index + 1}</td>
-                    <td><strong>{hit.title}</strong><small>{hit.policy_type} v{hit.policy_version}{hit.page_start ? ` · p.${hit.page_start}` : ''}</small></td>
-                    <td>{Math.round(hit.similarity * 100)}%</td>
-                    <td>{hit.vector_score != null ? hit.vector_score.toFixed(3) : '—'}</td>
-                    <td>{hit.lexical_score != null ? hit.lexical_score.toFixed(2) : '—'}</td>
-                    <td>{hit.fused_score != null ? hit.fused_score.toFixed(4) : '—'}</td>
-                    <td>{hit.rerank_score != null ? hit.rerank_score.toFixed(3) : '—'}</td>
-                    <td className="cell-text">{hit.chunk_text}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ol className="citation-list">
+            {result.hits.map((hit, index) => (
+              <li key={hit.chunk_id} className="citation">
+                <div className="citation__head">
+                  <span className="citation__id">{index + 1}</span>
+                  <strong>{hit.title}</strong>
+                  <span className="citation__where">Version {hit.policy_version}{hit.page_start ? `, page ${hit.page_start}` : ''}</span>
+                  <span className="citation__score">{Math.round(hit.similarity * 100)}% match</span>
+                </div>
+                <p>{hit.chunk_text}</p>
+                <details className="score-details">
+                  <summary>Scores</summary>
+                  <dl>
+                    <div><dt>Meaning (vector)</dt><dd>{hit.vector_score != null ? hit.vector_score.toFixed(3) : '—'}</dd></div>
+                    <div><dt>Keywords (BM25)</dt><dd>{hit.lexical_score != null ? hit.lexical_score.toFixed(2) : '—'}</dd></div>
+                    <div><dt>Combined (RRF)</dt><dd>{hit.fused_score != null ? hit.fused_score.toFixed(4) : '—'}</dd></div>
+                    <div><dt>Re-ranked</dt><dd>{hit.rerank_score != null ? hit.rerank_score.toFixed(3) : '—'}</dd></div>
+                  </dl>
+                </details>
+              </li>
+            ))}
+          </ol>
         </>
       ) : null}
     </div>
@@ -138,99 +142,113 @@ function RetrievalDebugger() {
 }
 
 export function AdminPoliciesPage() {
-  const [policies, setPolicies] = useState([]);
+  const [policies, setPolicies] = useState(null);
   const [categories, setCategories] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [busyId, setBusyId] = useState(null);
-  const [notice, setNotice] = useState('');
+  const [toast, setToast] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+
+  const notify = (type, title, message) => setToast({ type, title, message });
+  const closeToast = useCallback(() => setToast(null), []);
 
   const load = useCallback(async () => {
     const response = await api.get('/rag/policies', { params: statusFilter ? { status_filter: statusFilter } : {} });
     setPolicies(response.data);
   }, [statusFilter]);
 
+  useEffect(() => { load().catch(() => setPolicies([])); }, [load]);
   useEffect(() => {
-    load().catch(() => setPolicies([]));
-  }, [load]);
-
-  useEffect(() => {
-    api.get('/rag/taxonomy')
-      .then((response) => setCategories(response.data.categories.map((item) => item.category)))
-      .catch(() => setCategories([]));
+    api.get('/rag/taxonomy').then((response) => setCategories(response.data.categories.map((item) => item.category))).catch(() => setCategories([]));
   }, []);
 
-  const act = async (policy, label, request) => {
+  const act = async (policy, done, request) => {
     setBusyId(policy.id);
-    setNotice('');
     try {
       await request();
-      setNotice(`${label}: ${policy.title}`);
+      notify('success', done, policy.title);
       await load();
     } catch (actionError) {
-      setNotice(errorMessage(actionError, `${label} failed`));
+      notify('error', 'That didn’t work', errorMessage(actionError));
     } finally {
       setBusyId(null);
+      setConfirmId(null);
     }
   };
 
   const setStatus = (policy, status) => {
     const data = new FormData();
     data.append('new_status', status);
-    return act(policy, `Marked ${status}`, () => api.patch(`/rag/policies/${policy.id}/status`, data));
+    return act(policy, status === 'active' ? 'Policy activated' : 'Policy archived', () => api.patch(`/rag/policies/${policy.id}/status`, data));
   };
 
-  const remove = (policy) => {
-    if (!window.confirm(`Delete “${policy.title}” and its ${policy.chunk_count} indexed chunks? This cannot be undone.`)) return undefined;
-    return act(policy, 'Deleted', () => api.delete(`/rag/policies/${policy.id}`));
-  };
+  const list = policies || [];
+  const active = list.filter((policy) => policy.status === 'active').length;
 
   return (
     <>
-      <SectionCard title="Upload a policy" subtitle="Knowledge base">
-        <PolicyUpload categories={categories} onUploaded={() => load().catch(() => undefined)} />
-      </SectionCard>
+      <PageHeader title="Policies"
+        description="The reimbursement policies every claim is checked against. Only active policies are used." />
+      <Toast toast={toast} onClose={closeToast} />
 
-      <SectionCard title="Indexed policies" subtitle={`${policies.length} documents`}>
-        <div className="toolbar toolbar--compact">
-          <select aria-label="Filter policies by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="">All statuses</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="archived">Archived</option>
+      <Panel title="Policy library" description={policies ? `${active} active of ${list.length}` : null}
+        actions={(
+          <select className="select" aria-label="Filter policies by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All statuses</option><option value="active">Active</option>
+            <option value="inactive">Inactive</option><option value="archived">Archived</option>
           </select>
-          {notice ? <span className="muted-text">{notice}</span> : null}
-        </div>
-        <div className="table-wrap">
-          <table className="claims-table">
-            <thead><tr><th>Policy</th><th>Type</th><th>Effective</th><th>Chunks</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {policies.map((policy) => (
-                <tr key={policy.id}>
-                  <td><strong>{policy.title}</strong><small>#{policy.id} · v{policy.policy_version} · {policy.source_filename}</small></td>
-                  <td>{policy.policy_type}<small>{policy.department}</small></td>
-                  <td>{policy.effective_from || '—'}<small>to {policy.effective_to || 'open'}</small></td>
-                  <td>{policy.chunk_count}</td>
-                  <td><span className={statusClass(policy.status)}>{policy.status}</span></td>
-                  <td>
-                    <div className="button-row button-row--tight">
-                      {policy.status !== 'active'
-                        ? <button type="button" className="secondary" disabled={busyId === policy.id} onClick={() => setStatus(policy, 'active')}>Activate</button>
-                        : <button type="button" className="secondary" disabled={busyId === policy.id} onClick={() => setStatus(policy, 'archived')}>Archive</button>}
-                      <button type="button" className="secondary" disabled={busyId === policy.id} onClick={() => act(policy, 'Re-indexed', () => api.post(`/rag/policies/${policy.id}/reindex`))}>Re-index</button>
-                      <button type="button" className="secondary danger" disabled={busyId === policy.id} onClick={() => remove(policy)}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!policies.length ? <div className="empty-state"><div className="empty-state__icon">§</div><h3>No policies yet</h3><p>Upload a policy PDF or run the demo seed script.</p></div> : null}
-        </div>
-      </SectionCard>
+        )}>
+        {policies === null ? <p className="loading-line">Loading policies…</p> : list.length ? (
+          <div className="table-wrap">
+            <table className="claims-table">
+              <thead><tr><th>Policy</th><th>Category</th><th>In force</th><th className="num">Passages</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr></thead>
+              <tbody>
+                {list.map((policy) => (
+                  <tr key={policy.id}>
+                    <td><strong>{policy.title}</strong><small>Version {policy.policy_version}, {policy.source_filename}</small></td>
+                    <td>{policy.policy_type}<small>{policy.department}</small></td>
+                    <td className="cell-nowrap">{policy.effective_from ? formatDate(policy.effective_from) : 'Always'}
+                      <small>{policy.effective_to ? `until ${formatDate(policy.effective_to)}` : 'no end date'}</small></td>
+                    <td className="num">{policy.chunk_count}</td>
+                    <td><StatusBadge status={policy.status} /></td>
+                    <td>
+                      <div className="row-actions">
+                        {confirmId === policy.id ? (
+                          <>
+                            <span className="row-actions__ask">Delete for good?</span>
+                            <button type="button" className="button button--danger button--small" disabled={busyId === policy.id}
+                              onClick={() => act(policy, 'Policy deleted', () => api.delete(`/rag/policies/${policy.id}`))}>Delete</button>
+                            <button type="button" className="button button--ghost button--small" onClick={() => setConfirmId(null)}>Keep</button>
+                          </>
+                        ) : (
+                          <>
+                            {policy.status !== 'active'
+                              ? <button type="button" className="button button--ghost button--small" disabled={busyId === policy.id} onClick={() => setStatus(policy, 'active')}>Activate</button>
+                              : <button type="button" className="button button--ghost button--small" disabled={busyId === policy.id} onClick={() => setStatus(policy, 'archived')}>Archive</button>}
+                            <button type="button" className="button button--ghost button--small" disabled={busyId === policy.id}
+                              onClick={() => act(policy, 'Policy re-read', () => api.post(`/rag/policies/${policy.id}/reindex`))}>Re-read</button>
+                            <button type="button" className="button button--ghost button--small button--danger-text" disabled={busyId === policy.id}
+                              onClick={() => setConfirmId(policy.id)}>Delete</button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyState icon="policies" title="No policies">Add a policy PDF below. Claims can’t be checked until one is active.</EmptyState>}
+      </Panel>
 
-      <SectionCard title="Retrieval debugger" subtitle="Inspect hybrid search scores">
-        <RetrievalDebugger />
-      </SectionCard>
+      <div className="split split--even">
+        <Panel title="Add a policy" description="Upload a policy PDF. It’s read, split into passages and made searchable.">
+          <PolicyUpload categories={categories} onUploaded={() => load().catch(() => undefined)} notify={notify} />
+        </Panel>
+        <Panel title="Test a search" description="See which policy passages a claim or question would match.">
+          <SearchTest />
+        </Panel>
+      </div>
     </>
   );
 }

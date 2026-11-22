@@ -1,51 +1,93 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { api } from '../../api';
-import { SectionCard } from '../../components/SectionCard';
+import { Icon } from '../../components/Icon';
+import { EmptyState, FlagList, PageHeader, Panel, StatusBadge, formatDate, formatMoney, statusInfo } from '../../components/ui';
 
-const statusClass = (status) => `status-pill status-${String(status || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+const FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'open', label: 'Waiting', match: (tone) => ['processing', 'waiting', 'review'].includes(tone) },
+  { id: 'paid', label: 'Approved', match: (tone) => ['approved', 'partial'].includes(tone) },
+  { id: 'rejected', label: 'Rejected', match: (tone) => tone === 'rejected' },
+];
 
 export function AdminClaimsPage() {
-  const [claims, setClaims] = useState([]);
+  const [claims, setClaims] = useState(null);
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('All');
+  const [filter, setFilter] = useState('all');
 
   useEffect(() => {
     api.get('/claims').then((response) => setClaims(response.data)).catch(() => setClaims([]));
   }, []);
 
-  const filteredClaims = useMemo(() => claims.filter((claim) => {
-    const haystack = [claim.employee_name, claim.hospital_name, claim.treatment, claim.policy_decision].join(' ').toLowerCase();
-    return haystack.includes(query.toLowerCase()) && (status === 'All' || claim.status === status);
-  }), [claims, query, status]);
+  const visible = useMemo(() => {
+    const test = FILTERS.find((item) => item.id === filter)?.match;
+    const needle = query.trim().toLowerCase();
+    return (claims || []).filter((claim) => {
+      if (test && !test(statusInfo(claim.status).tone)) return false;
+      return !needle || [claim.employee_name, claim.hospital_name, claim.treatment, claim.invoice_number, `#${claim.id}`]
+        .join(' ').toLowerCase().includes(needle);
+    });
+  }, [claims, query, filter]);
 
-  const statuses = ['All', ...new Set(claims.map((claim) => claim.status).filter(Boolean))];
+  const total = visible.reduce((sum, claim) => sum + Number(claim.amount || 0), 0);
 
   return (
-    <SectionCard title="All Claims" subtitle={`${filteredClaims.length} of ${claims.length} claims` }>
-      <div className="toolbar">
-        <input aria-label="Search all claims" placeholder="Search employee, hospital or treatment..." value={query} onChange={(event) => setQuery(event.target.value)} />
-        <select aria-label="Filter claims by status" value={status} onChange={(event) => setStatus(event.target.value)}>
-          {statuses.map((item) => <option key={item}>{item}</option>)}
-        </select>
-      </div>
-      <div className="table-wrap">
-        <table className="claims-table">
-          <thead><tr><th>Employee</th><th>Treatment / Hospital</th><th>Amount</th><th>AI Policy</th><th>Status</th></tr></thead>
-          <tbody>
-            {filteredClaims.map((claim) => (
-              <tr key={claim.id}>
-                <td><strong>{claim.employee_name || 'Unknown'}</strong><small>Claim #{claim.id}</small></td>
-                <td><strong>{claim.treatment || 'Medical claim'}</strong><small>{claim.hospital_name || 'Unknown hospital'}</small></td>
-                <td>₹{claim.amount ?? '—'}</td>
-                <td>{claim.policy_decision || <span className="muted-text">Not verified</span>}</td>
-                <td><span className={statusClass(claim.status)}>{claim.status || 'Pending'}</span></td>
-              </tr>
+    <>
+      <PageHeader title="All claims" description="Every claim submitted, with the policy check’s recommendation and the final status." />
+      <Panel title={null}>
+        <div className="toolbar">
+          <div className="segmented" role="tablist" aria-label="Filter claims">
+            {FILTERS.map((item) => (
+              <button key={item.id} type="button" role="tab" aria-selected={filter === item.id}
+                className={`segmented__option ${filter === item.id ? 'segmented__option--active' : ''}`}
+                onClick={() => setFilter(item.id)}>{item.label}</button>
             ))}
-          </tbody>
-        </table>
-        {!filteredClaims.length ? <div className="empty-state"><div className="empty-state__icon">⌕</div><h3>No claims found</h3><p>Adjust the filters to see more claims.</p></div> : null}
-      </div>
-    </SectionCard>
+          </div>
+          <label className="search">
+            <Icon name="search" size={16} />
+            <input aria-label="Search all claims" placeholder="Search employee, hospital, treatment or invoice" value={query}
+              onChange={(event) => setQuery(event.target.value)} />
+          </label>
+        </div>
+
+        {claims === null ? <p className="loading-line">Loading claims…</p> : visible.length ? (
+          <div className="table-wrap">
+            <table className="claims-table">
+              <thead>
+                <tr><th>Claim</th><th>Employee</th><th>Treatment and hospital</th><th>Bill date</th>
+                  <th className="num">Amount</th><th>Policy check</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {visible.map((claim) => (
+                  <tr key={claim.id}>
+                    <td className="cell-id">#{claim.id}</td>
+                    <td><strong>{claim.employee_name}</strong></td>
+                    <td>
+                      <strong>{claim.treatment || 'Not read'}</strong>
+                      <small>{claim.hospital_name || 'Hospital not read'}</small>
+                      <FlagList flags={claim.risk_flags_json} />
+                    </td>
+                    <td className="cell-nowrap">{formatDate(claim.claim_date)}</td>
+                    <td className="num">{formatMoney(claim.amount)}
+                      {claim.final_approved_amount != null ? <small>{formatMoney(claim.final_approved_amount)} paid</small> : null}</td>
+                    <td>{claim.policy_decision ? <>{claim.policy_decision}<small>{formatMoney(claim.policy_approved_amount)}</small></> : <span className="muted">Not checked</span>}</td>
+                    <td><StatusBadge status={claim.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr><td colSpan={4}>{visible.length} {visible.length === 1 ? 'claim' : 'claims'}</td>
+                  <td className="num">{formatMoney(total)}</td><td colSpan={2} /></tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon="search" title={claims.length ? 'No claims match' : 'No claims yet'}>
+            {claims.length ? 'Try a different search or filter.' : 'Claims appear here as employees submit bills.'}
+          </EmptyState>
+        )}
+      </Panel>
+    </>
   );
 }

@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { api } from '../../api';
-import { SectionCard } from '../../components/SectionCard';
-import { FlagList, errorMessage, formatMoney, statusClass } from '../../components/ui';
+import { ClaimOutcome, ExtractedFields } from '../../components/ClaimViews';
+import { Icon } from '../../components/Icon';
+import { PageHeader, Panel, errorMessage, isFinal } from '../../components/ui';
 
 const MAX_UPLOAD_SIZE_MB = 10;
-const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.webp,.pdf';
+const ACCEPTED_TYPES = '.pdf,.png,.jpg,.jpeg,.webp';
 const POLL_INTERVAL_MS = 2500;
-const POLL_LIMIT = 48; // ~2 minutes
+const POLL_LIMIT = 72; // three minutes
 
 export function EmployeeUploadPage() {
   const inputRef = useRef(null);
@@ -31,9 +32,11 @@ export function EmployeeUploadPage() {
         const response = await api.get(`/claims/${claim.id}`);
         if (cancelled) return;
         setClaim(response.data);
-        const done = ['completed', 'failed'].includes(response.data.processing_status);
-        // After OCR completes, give policy verification a moment to attach its recommendation.
-        if ((done && (response.data.policy_decision || attempts > 6)) || attempts >= POLL_LIMIT) setPolling(false);
+        const read = ['completed', 'failed'].includes(response.data.processing_status);
+        // Once the bill is read, give the policy check a moment to attach its result.
+        if ((read && (response.data.policy_decision || isFinal(response.data.status) || attempts > 6)) || attempts >= POLL_LIMIT) {
+          setPolling(false);
+        }
       } catch {
         setPolling(false);
       }
@@ -45,18 +48,24 @@ export function EmployeeUploadPage() {
     setError('');
     if (!selected) return;
     if (selected.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
-      setError(`File size must not exceed ${MAX_UPLOAD_SIZE_MB} MB.`);
+      setError(`This file is larger than ${MAX_UPLOAD_SIZE_MB} MB. Upload a smaller scan or photo.`);
       return;
     }
     setFile(selected);
   };
 
+  const reset = () => {
+    setClaim(null);
+    setFile(null);
+    setTreatment('');
+    setDeclaredAmount('');
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
   const onSubmit = async (event) => {
     event.preventDefault();
     setError('');
-    setClaim(null);
-    if (!file) { setError('Select a medical bill image or PDF first.'); return; }
-
+    if (!file) { setError('Choose the bill to upload first.'); return; }
     const formData = new FormData();
     formData.append('file', file);
     if (treatment.trim()) formData.append('treatment', treatment.trim());
@@ -67,85 +76,93 @@ export function EmployeeUploadPage() {
       setClaim(response.data);
       setPolling(true);
       setFile(null);
-      setTreatment('');
-      setDeclaredAmount('');
       if (inputRef.current) inputRef.current.value = '';
     } catch (submissionError) {
-      setError(errorMessage(submissionError, 'Upload failed. Please try again.'));
-    } finally { setSubmitting(false); }
+      setError(errorMessage(submissionError, 'The bill could not be uploaded. Try again.'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const processing = claim && ['queued', 'processing'].includes(claim.processing_status);
+  const reading = claim && ['queued', 'processing'].includes(claim.processing_status);
 
   return (
-    <div className="upload-layout">
-      <SectionCard title="Submit a medical claim" subtitle="New claim">
-        <form className="stack" onSubmit={onSubmit}>
-          <div
-            className={`drop-zone ${dragging ? 'drop-zone--active' : ''}`}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files?.[0]); }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }}
-          >
-            <div className="upload-icon">↑</div>
-            <strong>{file ? file.name : 'Choose your medical bill'}</strong>
-            <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB selected` : 'Drag and drop or click to browse'}</p>
-            <span>PDF, PNG, JPG or WebP · Max {MAX_UPLOAD_SIZE_MB} MB</span>
-            <input ref={inputRef} type="file" accept={ACCEPTED_TYPES} onChange={(event) => chooseFile(event.target.files?.[0] || null)} disabled={submitting} />
-          </div>
-          <label>
-            Treatment (optional)
-            <input value={treatment} maxLength={120} placeholder="e.g. Root canal, MRI scan, Physiotherapy" onChange={(event) => setTreatment(event.target.value)} />
-          </label>
-          <label>
-            Amount you are claiming (optional)
-            <input type="number" min="1" step="0.01" value={declaredAmount} placeholder="₹ — checked against the bill total"
-              onChange={(event) => setDeclaredAmount(event.target.value)} />
-          </label>
-          <button type="submit" disabled={submitting || !file}>{submitting ? 'Uploading…' : 'Upload & submit claim'}</button>
-          {error ? <p className="error-text" role="alert">{error}</p> : null}
+    <>
+      <PageHeader title="Submit a bill" description="Upload one hospital or pharmacy bill per claim. It’s checked against your reimbursement policy as soon as it arrives." />
 
-          {claim ? (
-            <div className="result-box result-box--success" role="status" aria-live="polite">
-              <div className="result-heading">
-                <div className="success-icon">{processing ? '…' : '✓'}</div>
-                <div>
-                  <strong>{processing ? `Claim #${claim.id} is being processed` : `Claim #${claim.id} processed`}</strong>
-                  <p>{processing ? 'Reading your bill and checking it against policy…' : 'Here is what we extracted and the policy check result.'}</p>
-                </div>
+      <div className="split split--form">
+        {claim ? (
+          <Panel className="result-box" title={null}>
+            <div className="result-heading" role="status" aria-live="polite">
+              <span className={`result-heading__icon ${reading ? 'result-heading__icon--busy' : ''}`}>
+                {reading ? <span className="spinner" aria-hidden="true" /> : <Icon name="check" size={18} />}
+              </span>
+              <div>
+                <strong>{reading ? `Claim #${claim.id} is being processed` : `Claim #${claim.id} processed`}</strong>
+                <p>{reading ? 'Reading the bill and checking it against your policy…' : 'Here is what was read from your bill and the result.'}</p>
               </div>
-              {processing ? <div className="progress"><div className="progress__bar" /></div> : null}
-              <div className="detail-grid">
-                <div><span>Status</span><strong><span className={statusClass(claim.status)}>{claim.status}</span></strong></div>
-                <div><span>Treatment</span><strong>{claim.treatment || (processing ? 'Reading…' : 'Not found')}</strong></div>
-                <div><span>Hospital</span><strong>{claim.hospital_name || (processing ? 'Reading…' : 'Not found')}</strong></div>
-                <div><span>Bill amount</span><strong>{claim.amount != null ? formatMoney(claim.amount) : (processing ? 'Reading…' : 'Not found')}</strong></div>
-                <div><span>Bill date</span><strong>{claim.claim_date || (processing ? 'Reading…' : 'Not found')}</strong></div>
-                <div><span>Policy check</span><strong>{claim.policy_decision ? `${claim.policy_decision} · ${formatMoney(claim.policy_approved_amount)}` : 'Pending'}</strong></div>
-              </div>
-              <FlagList flags={claim.risk_flags_json} />
-              <p className="muted-text">{claim.policy_reason || claim.validation_message}</p>
-              <Link className="primary-link" to="/employee/status">Track in Claim Status</Link>
             </div>
-          ) : null}
-        </form>
-      </SectionCard>
+            {reading ? <div className="progress" aria-hidden="true"><div className="progress__bar" /></div> : <ClaimOutcome claim={claim} />}
+            <ExtractedFields claim={claim} reading={reading} />
+            <div className="button-row">
+              <Link className="button button--secondary" to="/employee/claims">Go to my claims</Link>
+              <button type="button" className="button button--ghost" onClick={reset}>Submit another bill</button>
+            </div>
+          </Panel>
+        ) : (
+          <Panel title={null}>
+            <form className="form" onSubmit={onSubmit}>
+              <div
+                className={`drop-zone ${dragging ? 'drop-zone--active' : ''} ${file ? 'drop-zone--chosen' : ''}`}
+                onClick={() => inputRef.current?.click()}
+                onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files?.[0]); }}
+                role="button"
+                tabIndex={0}
+                aria-label="Choose the bill to upload"
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inputRef.current?.click(); } }}
+              >
+                <span className="drop-zone__icon"><Icon name={file ? 'file' : 'submit'} size={24} /></span>
+                <strong>{file ? file.name : 'Drop the bill here, or choose a file'}</strong>
+                <span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB, ready to submit` : `PDF, JPG, PNG or WebP, up to ${MAX_UPLOAD_SIZE_MB} MB`}</span>
+                <input ref={inputRef} type="file" accept={ACCEPTED_TYPES} onChange={(event) => chooseFile(event.target.files?.[0] || null)} disabled={submitting} />
+              </div>
 
-      <aside className="card upload-help">
-        <p className="eyebrow">Before you submit</p>
-        <h2>For the best result</h2>
-        <ul>
-          <li>Use a clear, readable bill with all pages included.</li>
-          <li>Make sure the hospital name, date and total amount are visible.</li>
-          <li>Adding the treatment helps match the right policy faster.</li>
-          <li>Each bill can be submitted once; duplicates are detected automatically.</li>
-          <li>Not sure what is covered? Ask the <Link to="/employee/assistant">Coverage Assistant</Link>.</li>
-        </ul>
-      </aside>
-    </div>
+              <div className="form-row">
+                <label className="field">
+                  <span className="field__label">Treatment <span className="field__optional">optional</span></span>
+                  <input value={treatment} maxLength={120} placeholder="For example, root canal or MRI scan" onChange={(event) => setTreatment(event.target.value)} />
+                  <span className="field__hint">Helps when the bill doesn’t name the treatment clearly.</span>
+                </label>
+                <label className="field">
+                  <span className="field__label">Amount you’re claiming <span className="field__optional">optional</span></span>
+                  <input type="number" inputMode="decimal" min="1" step="0.01" value={declaredAmount} placeholder="₹"
+                    onChange={(event) => setDeclaredAmount(event.target.value)} />
+                  <span className="field__hint">Checked against the total on the bill.</span>
+                </label>
+              </div>
+
+              {error ? <p className="form-error" role="alert"><Icon name="alert" size={16} />{error}</p> : null}
+              <div className="button-row">
+                <button type="submit" className="button button--primary" disabled={submitting || !file}>
+                  {submitting ? 'Submitting…' : 'Submit claim'}
+                </button>
+              </div>
+            </form>
+          </Panel>
+        )}
+
+        <Panel title="Before you submit" className="panel--quiet">
+          <ul className="checklist">
+            <li><Icon name="check" size={16} />The hospital name, bill date and total are readable.</li>
+            <li><Icon name="check" size={16} />The bill is in the patient’s name on your account.</li>
+            <li><Icon name="check" size={16} />Every page of a multi-page bill is in one file.</li>
+            <li><Icon name="check" size={16} />Each bill is submitted once. Repeat uploads are detected.</li>
+          </ul>
+          <p className="panel__footnote">Not sure it’s covered? <Link to="/employee/assistant">Ask a coverage question</Link> first.</p>
+        </Panel>
+      </div>
+    </>
   );
 }

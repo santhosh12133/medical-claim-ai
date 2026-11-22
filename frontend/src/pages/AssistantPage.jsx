@@ -1,22 +1,28 @@
 import { PolicyAssistant } from '../components/PolicyAssistant';
-import { SectionCard } from '../components/SectionCard';
+import { PageHeader, Panel } from '../components/ui';
 
-export function AssistantPage() {
+export function AssistantPage({ audience = 'employee' }) {
   return (
-    <div className="upload-layout">
-      <SectionCard title="Ask about your coverage" subtitle="Policy assistant">
-        <PolicyAssistant />
-      </SectionCard>
-      <aside className="card upload-help">
-        <p className="eyebrow">How answers work</p>
-        <h2>Grounded in your policies</h2>
-        <ul>
-          <li>Answers come only from active reimbursement policies and cite the clause, version and page.</li>
-          <li>Add a bill amount to get a coverage estimate based on the policy limit.</li>
-          <li>Estimates do not include amounts you have already claimed this year or document checks.</li>
-          <li>If the policies do not cover your question, the assistant says so instead of guessing.</li>
-        </ul>
-      </aside>
-    </div>
+    <>
+      <PageHeader
+        title="Coverage questions"
+        description={audience === 'admin'
+          ? 'Ask what the active policies say. Answers quote the clause they come from.'
+          : 'Ask what your policy covers before you submit a bill. Answers quote the clause they come from.'}
+      />
+      <div className="split split--form">
+        <Panel title={null}>
+          <PolicyAssistant />
+        </Panel>
+        <Panel title="About these answers" className="panel--quiet">
+          <ul className="plain-list">
+            <li>Answers use only the active reimbursement policies, and show the policy, version and page.</li>
+            <li>Add a bill amount for an estimate of what would be reimbursed.</li>
+            <li>The estimate doesn’t include what you’ve already claimed this year, or checks on the bill itself.</li>
+            <li>If no policy covers the question, the answer says so.</li>
+          </ul>
+        </Panel>
+      </div>
+    </>
   );
 }

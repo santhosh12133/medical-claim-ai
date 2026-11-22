@@ -1,61 +1,53 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 
-export function AppShell({ title, subtitle, roleLabel, children, navItems, actions }) {
-  const isPortal = Boolean(roleLabel);
+import { useAuth } from '../auth/AuthContext';
+import { BrandMark, Icon } from './Icon';
+
+const ROLE_NAMES = { admin: 'Claims reviewer', employee: 'Employee' };
+
+function initials(name) {
+  return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('');
+}
+
+/** Signed-in frame: sidebar navigation (a top bar on small screens) and the page. */
+export function AppShell({ navItems }) {
+  const { user, signOut } = useAuth();
 
   return (
-    <div className={`app-shell ${isPortal ? 'app-shell--portal' : 'app-shell--public'} ${roleLabel ? `app-shell--${roleLabel.toLowerCase()}` : ''}`}>
-      {isPortal ? (
-        <aside className="sidebar">
-          <div className="brand">
-            <div className="brand-mark">MC</div>
-            <div>
-              <strong>Medical Claim AI</strong>
-              <span>Claims intelligence</span>
-            </div>
-          </div>
+    <div className="shell">
+      <a className="skip-link" href="#main">Skip to content</a>
+      <aside className="sidebar">
+        <div className="sidebar__brand">
+          <BrandMark />
+          <span>Medical Claim AI</span>
+        </div>
 
-          <div className="sidebar-section-label">Workspace</div>
-          <nav className="sidebar-nav" aria-label="Primary navigation">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => `sidebar-link ${isActive ? 'sidebar-link--active' : ''}`}
-              >
-                <span className="sidebar-link__dot" aria-hidden="true" />
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
+        <nav className="sidebar__nav" aria-label="Main">
+          {navItems.map((item) => (
+            <NavLink key={item.to} to={item.to}
+              className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}>
+              <Icon name={item.icon} />
+              <span>{item.label}</span>
+              {item.count ? <span className="nav-link__count">{item.count}</span> : null}
+            </NavLink>
+          ))}
+        </nav>
 
-          <div className="sidebar-footer">
-            <div className="account-card">
-              <div className="avatar">{roleLabel.slice(0, 1)}</div>
-              <div>
-                <strong>{roleLabel} Portal</strong>
-                <span>Secure workspace</span>
-              </div>
-            </div>
-            {actions}
+        <div className="sidebar__user">
+          <span className="avatar" aria-hidden="true">{initials(user?.full_name)}</span>
+          <div className="sidebar__who">
+            <strong>{user?.full_name}</strong>
+            <span>{ROLE_NAMES[user?.role] || user?.role}</span>
           </div>
-        </aside>
-      ) : null}
+          <button type="button" className="icon-button" onClick={signOut} aria-label="Sign out" title="Sign out">
+            <Icon name="signout" />
+          </button>
+        </div>
+      </aside>
 
-      <div className="app-content">
-        <header className="page-header">
-          <div>
-            <p className="eyebrow">{isPortal ? `${roleLabel} workspace` : 'Intelligent claims platform'}</p>
-            <div className="workspace-title-row">
-              <h1>{title}</h1>
-              {roleLabel ? <span className="role-chip">{roleLabel}</span> : null}
-            </div>
-            {subtitle ? <p className="hero-copy">{subtitle}</p> : null}
-          </div>
-          {!isPortal && actions ? <div className="header-actions">{actions}</div> : null}
-        </header>
-        <main>{children}</main>
-      </div>
+      <main id="main" className="workspace" tabIndex={-1}>
+        <Outlet />
+      </main>
     </div>
   );
 }

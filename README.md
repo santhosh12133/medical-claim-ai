@@ -150,9 +150,9 @@ python -m scripts.seed_demo_policies        # 25 demo reimbursement policies + e
 python scripts/benchmark_extraction.py --count 12 --keep ../sample_bills   # writes labelled sample bills
 ```
 
-Upload any file from `sample_bills/` (or `backend/sample_invoice.png`) as the employee, then open the admin
-**Review Queue** to see extracted fields, the agent trace, cited policy evidence and the recommendation. Ask
-coverage questions on the **Coverage Assistant** page.
+Upload any file from `sample_bills/` (or `backend/sample_invoice.png`) as the employee, then sign in as the
+reviewer and open the **Review queue** to see the extracted fields, the processing steps, the cited policy
+evidence and the recommendation. Ask what a policy covers on the **Coverage questions** page.
 
 ### Known limitations
 
@@ -295,28 +295,28 @@ See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
 
 ## Key capabilities
 
+One sign-in page for everyone; the account's role decides which workspace opens. Every decision is shown
+as a stamp (approved, partially approved, rejected, needs review) with the reason and the policy clause.
+
 ### Employee
 
-- authenticated claim submission
-- image/PDF upload
-- asynchronous processing status
-- claim history
-- policy decision summary
-- live processing status after upload (extracted fields + policy check)
-- **Coverage Assistant**: ask "is a ₹30,000 MRI covered?" and get a cited answer plus a coverage estimate
+- **Overview**: claims submitted, in progress, approved and reimbursed; recent claims
+- **Submit a bill**: drag-and-drop PDF or photo; live progress while it's read; the result with the
+  extracted details, the decision and any red flags explained in plain language
+- **My claims**: every claim with a progress timeline (submitted → read and checked → decision), filters and search
+- **Coverage questions**: ask "is a ₹30,000 MRI covered?" and get an answer that cites the policy clause, plus
+  an estimate
 
-### Administrator
+### Reviewer (admin)
 
-- claim search and review
-- manual approval/rejection
-- policy ingestion and lifecycle management
-- verification audit history
-- decision and processing metrics
-- claim activity timeline
-- review queue with cited evidence, confidence breakdown, extracted rule and risk flags
-- approve with an adjusted amount and reviewer notes; reprocess; view the original bill
-- policy knowledge-base page: upload, activate/archive, re-index, delete
-- retrieval debugger showing vector, BM25, RRF and rerank scores per chunk
+- **Overview**: queue size, approvals, rejections, share decided automatically, why claims were sent for review,
+  recent activity
+- **Review queue**: claims the checks couldn't settle, with red flags, the policy check's recommendation, the
+  cited clause, the extracted rule, confidence, and every processing step; approve (optionally a different
+  amount) or reject with a note to the employee; view the original bill; re-run the policy check or re-read the bill
+- **All claims**: searchable table with filters and totals
+- **Policies**: policy library (activate, archive, re-read, delete with confirmation), add a policy PDF, and a
+  search test showing which passages match, with vector, BM25, RRF and rerank scores
 
 ### Intelligence and automation
 
