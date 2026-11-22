@@ -160,7 +160,7 @@ coverage questions on the **Coverage Assistant** page.
 - The LLM integration (OpenAI/Anthropic) has been verified only for graceful failure so far. A live check (`scripts/llm_live_check.py`, CI job "Live LLM check") runs automatically once an `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` repository secret exists; until then, LLM answers, planning and adjudication are untested against a live model.
 - The production agent uses the deterministic `RulePlanner`; the `LLMPlanner` is implemented and unit-tested with a scripted model only.
 - Throughput was measured on a shared CI runner; real capacity depends on hardware, document mix and worker count.
-- Manual-review reduction depends on `AUTO_DECISION_ENABLED` and its confidence threshold. On the synthetic CI mix it is about 50% (the rest is escalated, mostly by design: risk flags and deliberately ambiguous claims; the e2e report lists the reasons). It has not been measured on real claim traffic.
+- Manual-review reduction depends on `AUTO_DECISION_ENABLED` and its confidence threshold. On the synthetic CI mix it is about 53% (19/36, none wrong). Of the 17 escalations, 13 are the OCR safety check (the OCR passes disagreed on a field of a noisy or skewed scan) and 4 are overlapping demo-policy limits; `e2e_check.py` reports the breakdown. It has not been measured on real claim traffic.
 
 ---
 
@@ -706,8 +706,10 @@ Implemented:
 - [x] Engineering documentation system
 - [x] Labelled OCR/NLP extraction benchmark published (synthetic invoices, held-out seeds)
 - [x] Worker throughput measured end-to-end in CI (shared runner, synthetic bills)
-- [ ] Evaluation on representative real (anonymised) bills and insurer policies
-- [ ] Live LLM verification with a real API key
+- [x] Default install free of known vulnerable dependencies (pip-audit and npm audit, no exceptions)
+- [x] Live-LLM check and real-bill evaluation tooling in place
+- [ ] Evaluation on representative real (anonymised) bills and insurer policies (tooling ready)
+- [ ] Live LLM verification with a real API key (runs in CI once the key secret is added)
 - [ ] Production object storage / managed queue where scale requires it
 - [ ] Hardened browser refresh/session token architecture
 

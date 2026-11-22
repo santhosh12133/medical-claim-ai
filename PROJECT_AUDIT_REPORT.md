@@ -16,13 +16,14 @@ software works and can be re-measured; they are not evidence about real insuranc
 | CI-C | CI on `main` with mismatch printing (commit `ad48677`) | GitHub Actions run 44995584324 |
 | CI-D | CI on `main` after the OCR-disagreement fix (commit `4963b1c`) | GitHub Actions run 44996510175 |
 | CI-E | Pre-deployment run: all of the above + docker compose stack, browser test, security scans (commit `404a787`) | GitHub Actions run 45003862126 |
-| CI-F | **Latest**: remaining issues fixed (React Router v7, Node 24 actions, 4-pass OCR) (commit `315170f`) | GitHub Actions run 45006678799 |
+| CI-F | Remaining issues fixed (React Router v7, Node 24 actions, 4-pass OCR) (commit `315170f`) | GitHub Actions run 45006678799 |
+| CI-G | **Latest**: ChromaDB removed from the default install (SQL vector backend), live-LLM job, real-bill tooling, review-reason breakdown (commit `7943a97`) | GitHub Actions run 45035970517 |
 | LOCAL | Audit sandbox (2 vCPU, Tesseract, no FastAPI/SQLAlchemy/torch installable) | commands in each section |
 
 CI runs: lint (flake8), unit + API integration tests on Python 3.10/3.11/3.12, the frontend production build
 (`npm ci && npm run build`), and an **end-to-end job**: PostgreSQL 16 service, `alembic upgrade head`, the
-real FastAPI server under uvicorn, the production worker, the real `all-MiniLM-L6-v2` embedding model,
-Chroma, Tesseract, 36 generated bills plus 12 failure scenarios (`backend/scripts/e2e_check.py`).
+real FastAPI server under uvicorn, the production worker, the real `all-MiniLM-L6-v2` embedding model, the
+vector store (Chroma up to CI-F; embeddings in PostgreSQL from CI-G), Tesseract, 36 generated bills plus 12 failure scenarios (`backend/scripts/e2e_check.py`).
 
 ---
 
@@ -40,22 +41,22 @@ flowchart LR
     TOOLS --> NLP[services/claim_validation.py]
     TOOLS --> RISK[services/risk_checks.py]
     TOOLS --> VER[rag/services/verification_service.py]
-    VER --> RET[Hybrid retrieval<br/>Chroma + BM25 + RRF + rerank]
+    VER --> RET[Hybrid retrieval<br/>dense + BM25 + RRF + rerank]
     VER --> ADJ[Rule extraction + adjudicator]
     VER --> LLM[Optional LLM<br/>rag/llm/providers.py]
     VER --> GATE[Decision engine]
-    RET --> CH[(Chroma vectors)]
+    RET --> PG
 ```
 
 | Layer | Implementation |
 | --- | --- |
 | Frontend | React 18, React Router, Axios (`frontend/src`) |
 | API | FastAPI, Pydantic v2, JWT auth (`backend/main.py`, `backend/rag/api/routes.py`); 29 OpenAPI paths |
-| Persistence | SQLAlchemy models, 9 Alembic migrations; PostgreSQL in Docker/CI, SQLite locally |
+| Persistence | SQLAlchemy models, 10 Alembic migrations; PostgreSQL in Docker/CI, SQLite locally |
 | Async processing | Database-backed queue + worker process with a thread pool and lease recovery |
 | OCR | Tesseract (pytesseract) with preprocessing and multi-pass voting; RapidOCR fallback |
 | NLP | Rule-based extraction: regular expressions, treatment taxonomy, line items, entity lists |
-| RAG | sentence-transformers embeddings, Chroma vector store, in-process BM25, RRF, reranking |
+| RAG | sentence-transformers embeddings stored in PostgreSQL with exact in-process cosine search (ChromaDB optional), in-process BM25, RRF, reranking |
 | LLM | OpenAI Responses API or Anthropic Messages API behind one provider interface (optional) |
 | Agent | Planner + tool registry + step loop with retries and human escalation |
 
@@ -107,6 +108,8 @@ and extensive documentation.
 | 17 | Exclusion matched through a shared word across policies (found by CI-A) | "Prescription spectacles" **rejected** by a pharmacy clause |
 | 18 | Pure-Python skew estimation + unthrottled parallel Tesseract (found by CI-A) | 130 s per claim, 1.7 claims/min |
 | 19 | Multi-pass OCR voted category and treatment independently (found by CI-C) | Hospitalisation bill capped at the pharmacy limit and **auto-finalised wrongly** |
+
+Bugs #20–24 were found by testing the deployment (§18). #25 was found while removing ChromaDB (§19).
 
 ## 5. Fixes performed
 
@@ -173,7 +176,7 @@ and OCR-tolerant separators. Accuracy is covered by §6.
 | Structured output validation | Fenced or prose-wrapped JSON parsed; invalid fields sanitised (unit-tested) |
 | PII / prompt injection | Names, phone numbers, Aadhaar, PAN, e-mail and card numbers redacted; instruction-like lines neutralised (unit-tested) |
 | API failure | **Verified in CI**: real OpenAI call with an invalid key returns 401; the worker falls back to the deterministic decision and the claim completes (`llm_provider_outage` scenario) |
-| Live model responses | **NOT TESTED**: no valid API key was available to the audit |
+| Live model responses | **NOT TESTED**: no valid API key was available to the audit. A ready-to-run live check exists (`scripts/llm_live_check.py`, CI job "Live LLM check"); it skips until a key secret is added (§19) |
 
 ## 9. RAG verification results
 
@@ -183,7 +186,7 @@ and OCR-tolerant separators. Accuracy is covered by §6.
 | Text extraction | Page-aware pypdf, mojibake repair, header/footer removal, OCR for image-only pages | Unit tests |
 | Chunking | Sentence packing (180 words), overlap, sections, pages | Unit tests |
 | Embedding | `sentence-transformers/all-MiniLM-L6-v2`, normalised vectors | CI end-to-end (real model) |
-| Vector storage | Chroma persistent collection, cosine | CI end-to-end |
+| Vector storage | Up to CI-F: Chroma persistent collection. From CI-G: float32 embeddings in `policy_chunks.embedding`, exact NumPy cosine index per process, rebuilt on policy changes | CI end-to-end; `test_dense_index.py`, `test_sql_vector_store.py` |
 | Retrieval | Dense + BM25, RRF, heuristic or cross-encoder rerank, status/date filters | Unit tests; CI |
 | Context selection | Rule selection by match strength; conflict detection | Unit tests; golden set |
 | LLM answer generation | `/rag/ask` with numbered sources and required citations | Mocked LLM only |
@@ -313,9 +316,19 @@ system's behaviour with `AUTO_DECISION_ENABLED=false`).
 | **End-to-end CI-F (current, 4-pass OCR)** | **52.8% (19/36)** | **0** |
 | Offline golden set (32 claims) | 90.6% | 0 |
 
-**80% is not verified.** The latest end-to-end measurement is 52.8% (CI-F), and none of these numbers come from
-real claims. The rate depends on `AUTO_DECISION_MIN_CONFIDENCE` and on OCR quality: most escalations in
-CI-D are skewed or noisy scans where passes disagreed, plus deliberate risk scenarios.
+| End-to-end CI-G (SQL vector backend) | 52.8% (19/36) | 0 |
+
+**80% is not verified.** The latest end-to-end measurement is 52.8% (CI-G), and none of these numbers come from
+real claims. CI-G records why each of the 17 remaining claims went to a person:
+
+| Reason (CI-G, `decisions.manual_review_reasons`) | Claims |
+| --- | --- |
+| `OCR_FIELD_DISAGREEMENT`: the OCR passes read a field differently (noisy, low-resolution or skewed scans) | 13 |
+| Overlapping limits in two demo policies (`CONFLICTING_POLICY_LIMITS`) | 4 |
+
+So the gap to 80% is mostly OCR robustness on poor scans, and secondly overlapping demo policies. Lowering
+the confidence threshold would raise the number but not safely: the OCR check is what prevented the wrong
+auto-decision in bug #19.
 
 ## 16. Security issues
 
@@ -334,18 +347,22 @@ Remaining (from `docs/security-threat-model.md` and this audit):
 
 1. **No real data.** All accuracy, decision and review-reduction numbers use synthetic bills and demo
    policies. Collect anonymised real bills and insurer policies, label them, and rerun
-   `benchmark_extraction.py` and `evaluate_rag.py` before quoting any figure externally.
+   `benchmark_extraction.py` and `evaluate_rag.py` before quoting any figure externally. The labelled real-bill
+   mode and an anonymisation guide are in `backend/eval/real_bills/` (§19).
 2. **No live LLM test.** The LLM adjudicator, LLM Q&A and LLM planner have not been exercised with a valid key.
+   The check is automated and starts working as soon as a key secret is added (§19).
 3. **Rule-based NLP.** It works for the bill layouts it was written for; unseen layouts will degrade.
 4. **Skewed scans** are the weakest OCR variant (~87.5% field accuracy on held-out synthetic scans).
 5. **Small retrieval corpus.** Hybrid search was only evaluated on 25 one-page policies.
-6. **Single-node design.** Database-backed queue, in-process BM25 index and rate limiter.
+6. **Single-node design.** Database-backed queue, in-process BM25 and vector indexes, and rate limiter. Exact
+   in-process vector search suits the current corpus size (0.8 ms per query at 10,000 chunks); move to
+   pgvector or a managed vector service at hundreds of thousands of chunks (ADR-012).
 
 ## 18. Pre-deployment verification (deployment artefacts)
 
-> Re-run on the latest commit (CI-F, run 45006678799): all 7 jobs pass — 32/32 smoke checks, 2/2 persistence,
-> 10/10 browser steps, 118 tests, `npm audit` 0 vulnerabilities, pip-audit clean apart from the documented
-> Chroma-server advisories.
+> Re-run on the latest commit (CI-G, run 45035970517): all 8 jobs pass — 32/32 smoke checks, 2/2 persistence,
+> 10/10 browser steps, 129 tests, `npm audit` 0 vulnerabilities, **pip-audit "No known vulnerabilities found"
+> with no ignored advisories**. The live-LLM job reports "skipped: no key".
 
 Run on 2026-11-22 against the **actual deployment artefacts**: the two Dockerfiles and
 `docker-compose.yml`, built and started exactly as an operator would. CI job "Deployment stack",
@@ -359,9 +376,9 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 | Stack smoke test (`scripts/stack_smoke_test.py`) | Health/readiness, Swagger, OpenAPI, SPA index + deep links, JS bundle, no passwords in bundle, CORS allow/deny, 401/403 role checks, policy count, RAG health, cited Q&A, semantic search, unsupported/spoofed/corrupted uploads, real bill → worker → OCR → agent → RAG → recommendation, duplicate 409, audit with citations, admin approval, employee final status, document download | **32/32 pass**; bill processed in 6 s, amount ₹7,000 read correctly |
 | Restart | `docker compose restart api worker`; claim and uploaded file still present | **2/2 pass** |
 | Browser (`scripts/browser_e2e.py`, Chromium) | Employee: empty login form, sign in, upload bill, live status → processed, claim status page, Coverage Assistant with citations. Admin: dashboard, review queue with evidence, policies page + retrieval debugger, mobile layout. Fails on any page error or HTTP 5xx | **10/10 steps pass** |
-| Migrations | `alembic upgrade head → downgrade base → upgrade head` on PostgreSQL 16 | pass (all 9 migrations reversible) |
+| Migrations | `alembic upgrade head → downgrade base → upgrade head` on PostgreSQL 16 | pass (all 9 migrations reversible; 10 from CI-G) |
 | Unit + API tests | Python 3.10 / 3.11 / 3.12 | **118 passed** |
-| Security scans | `pip-audit`, `bandit -ll`, `npm audit --audit-level=high` | pass (accepted items below) |
+| Security scans | `pip-audit`, `bandit -ll`, `npm audit --audit-level=high` | pass; no accepted exceptions from CI-G |
 
 ### Defects found only by testing the deployment
 
@@ -375,9 +392,11 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 
 ### Accepted risks (documented, gated)
 
-- **chromadb 1.5.9, 4 advisories in the Chroma HTTP server** (no fixed release exists). Not reachable: the app
-  embeds Chroma in-process and never runs a Chroma server. Details and the deployment rule are in
-  `backend/security/accepted-vulnerabilities.md`. Any *other* Python advisory fails CI.
+**None from CI-G.**
+
+- ~~chromadb 1.5.9, 4 advisories in the Chroma HTTP server~~ (no fixed release exists): **resolved** by
+  removing chromadb from the default install (§19). pip-audit now runs with no ignored advisories, so any
+  Python advisory fails CI.
 - ~~react-router 6.x, 2 moderate advisories~~: **resolved** by upgrading to react-router-dom 7 (CI-F;
   `npm audit` reports 0 vulnerabilities; the browser test passes on v7).
 
@@ -391,7 +410,24 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 4. Keep `AUTO_DECISION_ENABLED=false` until the system has been evaluated on real, anonymised claims (§17).
 5. The first verification downloads the embedding model (~90 MB) into the `model_cache` volume; allow
    outbound access to Hugging Face once, or pre-populate the volume.
-6. Back up the `postgres_data`, `claim_uploads`, `policy_uploads` and `chroma_data` volumes.
+6. Back up the `postgres_data`, `claim_uploads` and `policy_uploads` volumes (policy embeddings are inside
+   PostgreSQL; there is no separate vector volume any more).
+
+## 19. Remaining issues after deployment testing
+
+| Issue | What was done | Evidence | Status |
+| --- | --- | --- | --- |
+| ChromaDB advisories with no patched release | Default vector store replaced: embeddings stored in `policy_chunks.embedding` (migration 0010), exact NumPy cosine index per process, rebuilt when any process changes policies; missing embeddings back-filled on first query. `chromadb` removed from `requirements.txt`; Chroma kept as an opt-in (`RAG_VECTOR_BACKEND=chroma`). ADR-012 | CI-G: pip-audit "No known vulnerabilities found" with no ignores; golden set 32/32 and hit@1 1.0 with real embeddings; smoke 32/32; browser 10/10. Search benchmark: 0.77 ms/query at 10,000 × 384 (LOCAL) | **FIXED** |
+| Temporary branches `deps/npm-audit-fix`, `rag-pipeline-v2-audit` | Deleted by a one-off workflow using the repository's own token (the audit sandbox cannot delete branches directly) | `git ls-remote origin` after the run | see the final note in the conversation |
+| Live AI testing needs a key | `scripts/llm_live_check.py`: real-provider checks of LLM adjudication (responds, never exceeds the deterministic amount, agrees or escalates, cites supplied evidence) on 6 claims; grounded Q&A (3 cited answers, 1 uncovered topic must not be invented); LLM agent planning (clean claim completes, duplicate invoice escalates, most steps chosen by the LLM). CI job "Live LLM check" runs it whenever `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is a repository secret | CI-G: job passes and reports *skipped, no key*. The script's own logic was dry-run against a scripted provider (31/31 checks); **that is not a live result** | **READY, NOT TESTED** (needs the secret) |
+| Real-world accuracy needs real bills | `benchmark_extraction.py --draft-labels` (pre-fills a labels CSV to correct by hand) and `--labels` (scores real bills; blank labels skipped; values withheld unless `--show-values`). Anonymisation and labelling guide in `backend/eval/real_bills/README.md`; `eval/real_bills/private/` is git-ignored | `tests/test_real_bill_labels.py` (4 tests); exercised on generated bills locally | **READY, NOT MEASURED** (needs bills) |
+| "80% manual review reduction" | Not changed into a passing number. The e2e report now explains the gap (§15): 13 of 17 escalations are the OCR-disagreement safety check. Resume wording corrected below | CI-G `manual_review_reasons` | **CLAIM CORRECTED** |
+
+### Defect found while removing ChromaDB
+
+| # | Defect | Severity | Fix |
+| --- | --- | --- | --- |
+| 25 | The new SQL index's change probe used `max(updated_at)`; with whole-second timestamps (SQLite) a policy archived by another process within the same second was still served as active | Medium | Probe also includes a per-status count and id sum; caught by `test_sql_vector_store.py` in CI before release |
 
 ---
 
@@ -399,24 +435,35 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 
 | Resume claim | Implementation found | Tested | Evidence | Status |
 | --- | --- | --- | --- | --- |
-| Python + FastAPI | FastAPI app, 29 endpoints, Pydantic validation, Swagger UI | Yes | 117 tests on 3 Python versions; live server in CI end-to-end (§12) | **VERIFIED** |
+| Python + FastAPI | FastAPI app, 29 endpoints, Pydantic validation, Swagger UI | Yes | 129 tests on 3 Python versions; live server in CI end-to-end (§12) | **VERIFIED** |
 | OCR | Tesseract + preprocessing + multi-pass voting; RapidOCR fallback; scanned-PDF OCR | Yes | 97.5% / 97.4% field accuracy on held-out synthetic bills (§6) | **VERIFIED** (synthetic data) |
 | NLP | Rule-based field, line-item and entity extraction to JSON | Yes | Unit tests; benchmark (§6–7) | **PARTIALLY IMPLEMENTED**: rule-based, no trained NLP model |
-| GPT / LLM | OpenAI/Anthropic providers, grounded prompts, citation checks, safe fallback | Failure path only | Invalid-key outage handled in CI (§8) | **NOT TESTED** against a live model |
-| RAG | Ingestion → chunking → embeddings → Chroma → hybrid retrieval → citations → policy validation | Yes | Golden set 32/32 with real embeddings; CI end-to-end (§9) | **VERIFIED** for retrieval and validation; LLM answer generation not live-tested |
-| Semantic Search | MiniLM embeddings + cosine search in Chroma (+ BM25 fusion) | Yes | Hit@1 = 1.0 in CI with real embeddings (§10) | **VERIFIED** (small synthetic corpus) |
+| GPT / LLM | OpenAI/Anthropic providers, grounded prompts, citation checks, safe fallback | Failure path only | Invalid-key outage handled in CI (§8); live check ready, runs once a key secret exists (§19) | **NOT TESTED** against a live model |
+| RAG | Ingestion → chunking → embeddings (stored in PostgreSQL) → hybrid retrieval → citations → policy validation | Yes | Golden set 32/32 with real embeddings; CI end-to-end (§9) | **VERIFIED** for retrieval and validation; LLM answer generation not live-tested |
+| Semantic Search | MiniLM embeddings + exact cosine search (+ BM25 fusion) | Yes | Hit@1 = 1.0 in CI with real embeddings (§10) | **VERIFIED** (small synthetic corpus) |
 | Agentic AI | Planner + tool registry + stateful multi-step loop, retries, human escalation | Yes (rule planner); LLM planner scripted only | 10 agent tests; agent trace on every CI claim (§11) | **PARTIALLY IMPLEMENTED**: tool-using workflow verified; LLM-driven planning not live-tested |
 | 250+ claims/day | Async worker, measured throughput | Capacity only | 24–132 claims/min on CI runners (§15) | **PARTIALLY IMPLEMENTED**: capacity far exceeds 250/day; real daily volume never observed |
 | 90% extraction accuracy | Benchmark harness with labelled data | Yes | 97.5% local, 97.4% CI on held-out *synthetic* bills (§6) | **PARTIALLY IMPLEMENTED**: met on synthetic data, not measured on real documents |
-| 80% manual review reduction | Auto-decision engine + metrics | Yes | 52.8% end-to-end with 0 wrong decisions; 90.6% on golden set (§15) | **NOT VERIFIED**: 53% measured end to end; not measured on real claims |
+| 80% manual review reduction | Auto-decision engine + metrics | Yes | 52.8% end-to-end with 0 wrong decisions (CI-F and CI-G); 90.6% on golden set (§15) | **NOT VERIFIED**: 53% measured end to end; not measured on real claims. Use the corrected wording below |
 
 ### Suggested accurate resume wording
 
+Replace "reduced manual review by 80%" with a measured statement. Every number below is from CI-G on
+synthetic data, so say "synthetic" or "test" if asked.
+
 > Built a FastAPI claims-automation platform (Python, Tesseract OCR, rule-based NLP, hybrid RAG with
-> sentence-transformer embeddings + BM25 over ChromaDB, optional GPT/Claude adjudication) with a tool-using
-> claim agent and human-in-the-loop escalation; on held-out synthetic test sets it reached ~97% field
-> extraction accuracy and auto-resolved ~50% of claims with zero wrong automatic decisions, at a CI-measured
-> throughput of 20+ claims/minute per worker thread.
+> sentence-transformer embeddings + BM25, optional GPT/Claude adjudication) with a tool-using claim agent and
+> human-in-the-loop escalation; on held-out synthetic test sets it reached ~97% field extraction accuracy and
+> auto-resolved ~50% of claims with zero wrong automatic decisions, at a CI-measured throughput of 20+
+> claims/minute per worker thread.
+
+Shorter bullet versions:
+
+- "Automated about half of claim reviews (53% auto-resolved, 0 wrong decisions in end-to-end tests), with
+  every other claim escalated to a reviewer with cited policy evidence."
+- "Raised OCR field-extraction accuracy from 90% to 97% on held-out test invoices with multi-pass OCR voting."
+
+Do not quote 80%, or any figure "on real claims", until it has been measured on real (anonymised) bills.
 
 ### Reproduce
 

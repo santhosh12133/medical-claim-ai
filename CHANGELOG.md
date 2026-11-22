@@ -4,6 +4,29 @@ All notable project changes should be recorded here for human-readable release h
 
 The repository currently uses commit history as the authoritative implementation history. This file establishes the release-facing format for future versioned releases.
 
+## [2.1.0] - 2026-11-22 — PostgreSQL vector store, live-LLM check, real-bill evaluation
+
+### Changed
+
+- Policy embeddings are stored in PostgreSQL (`policy_chunks.embedding`, migration 0010) and searched with an
+  exact in-process cosine index (`RAG_VECTOR_BACKEND=sql`, the default). `chromadb` is no longer installed
+  by default, which removes its unpatched advisories; `RAG_VECTOR_BACKEND=chroma` keeps it as an option.
+  Existing deployments back-fill embeddings automatically on the first query (ADR-012).
+- pip-audit runs with no ignored advisories.
+
+### Added
+
+- `scripts/llm_live_check.py` and the CI job "Live LLM check" (runs when an OpenAI or Anthropic key secret
+  is configured, skips otherwise).
+- Real-bill accuracy evaluation: `benchmark_extraction.py --draft-labels/--labels`, anonymisation guide in
+  `backend/eval/real_bills/README.md`.
+- `e2e_check.py` reports why each claim was left for manual review.
+
+### Fixed
+
+- Vector-index change probe could miss a policy status change made by another process within the same
+  second.
+
 ## [2.0.0] - 2026-11-22 — RAG pipeline v2
 
 ### Fixed
