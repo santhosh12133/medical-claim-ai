@@ -429,6 +429,23 @@ run 45003862126 (commit `404a787`); every job in that run passed.
 | --- | --- | --- | --- |
 | 25 | The new SQL index's change probe used `max(updated_at)`; with whole-second timestamps (SQLite) a policy archived by another process within the same second was still served as active | Medium | Probe also includes a per-status count and id sum; caught by `test_sql_vector_store.py` in CI before release |
 
+## 20. One-command server deployment
+
+`deploy/setup-server.sh` installs the stack on one Ubuntu server behind Caddy (HTTPS, website at `/`, API at
+`/api`, only ports 80/443 published), creates real accounts with random passwords (`scripts/create_user.py`;
+no demo accounts), and installs daily backups. Guide: `docs/deploy-free-server.md` (Oracle Cloud Always Free).
+
+CI job "Server setup script", run 45040612730 (commit `7476631`), on fresh x86_64 and arm64 runners (the Arm
+one matches Oracle's Ampere machines): install → 15 checks through the web server (bundle points at `/api`,
+Swagger works under `/api`, no demo passwords or demo accounts, security headers, ports 8000/8080/5432 not
+exposed, admin login, policies searchable, the API sees the client address rather than the proxy's) →
+10/10 browser steps with the created accounts → re-run keeps secrets, data and accounts → backup dump and
+file archive readable. **All passed on both architectures.** It has not been run on an actual Oracle VM,
+because that needs the owner's account.
+
+Two small fixes came out of this: login e-mail is now case-insensitive, and the API trusts `X-Forwarded-For`
+only in the proxied production layout, where nothing but Caddy can reach it.
+
 ---
 
 ## Resume claim verification
