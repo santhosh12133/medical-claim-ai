@@ -134,6 +134,8 @@ flowchart LR
 | Policy decisions | 32/32 correct offline; original pipeline 1/32 (no policy retrieved for 30) | `python scripts/evaluate_rag.py`; [`docs/rag-pipeline.md`](docs/rag-pipeline.md) |
 | End-to-end | PostgreSQL + API + worker + real embeddings: 12/12 failure scenarios pass; 17/36 synthetic claims auto-finalised, 0 wrong; 24–132 claims/min | CI job "End-to-end"; `scripts/e2e_check.py` |
 
+| Deployment stack | `docker compose` build + up, 32/32 smoke checks, restart persistence, 10/10 Chromium browser steps, full migration rollback, security scans | CI job "Deployment stack"; `scripts/stack_smoke_test.py`, `scripts/browser_e2e.py`; [audit §18](PROJECT_AUDIT_REPORT.md) |
+
 All datasets are **synthetic** (generated invoices, demo policies). They are regression guards, not proof of
 real-world accuracy, throughput or review reduction. See the audit report for what is and is not verified.
 

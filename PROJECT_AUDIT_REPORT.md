@@ -14,7 +14,8 @@ software works and can be re-measured; they are not evidence about real insuranc
 | CI-A | Full CI before the final fixes (commit `14701d2`) | GitHub Actions run 44983647296 |
 | CI-B | Full CI after the fixes, on `main` (commit `f4703d3`) | GitHub Actions run 44994780451 |
 | CI-C | CI on `main` with mismatch printing (commit `ad48677`) | GitHub Actions run 44995584324 |
-| CI-D | **Final** CI on `main` after the OCR-disagreement fix (commit `4963b1c`) | GitHub Actions run 44996510175 |
+| CI-D | CI on `main` after the OCR-disagreement fix (commit `4963b1c`) | GitHub Actions run 44996510175 |
+| CI-E | **Pre-deployment run**: all of the above + docker compose stack, browser test, security scans (commit `404a787`) | GitHub Actions run 45003862126 |
 | LOCAL | Audit sandbox (2 vCPU, Tesseract, no FastAPI/SQLAlchemy/torch installable) | commands in each section |
 
 CI runs: lint (flake8), unit + API integration tests on Python 3.10/3.11/3.12, the frontend production build
@@ -333,6 +334,54 @@ Remaining (from `docs/security-threat-model.md` and this audit):
 4. **Skewed scans** are the weakest OCR variant (~80% field accuracy).
 5. **Small retrieval corpus.** Hybrid search was only evaluated on 25 one-page policies.
 6. **Single-node design.** Database-backed queue, in-process BM25 index and rate limiter.
+
+## 18. Pre-deployment verification (deployment artefacts)
+
+Run on 2026-11-22 against the **actual deployment artefacts**: the two Dockerfiles and
+`docker-compose.yml`, built and started exactly as an operator would. CI job "Deployment stack",
+run 45003862126 (commit `404a787`); every job in that run passed.
+
+| Stage | What was tested | Result |
+| --- | --- | --- |
+| Build | `docker compose config`, `docker compose build` (backend + nginx frontend) | pass |
+| Start | `docker compose up -d`: PostgreSQL, API (runs `alembic upgrade head`), worker, frontend; health checks | all containers healthy |
+| Seed | Demo users + 25 demo policies, embedded with the real model inside the API container | pass |
+| Stack smoke test (`scripts/stack_smoke_test.py`) | Health/readiness, Swagger, OpenAPI, SPA index + deep links, JS bundle, no passwords in bundle, CORS allow/deny, 401/403 role checks, policy count, RAG health, cited Q&A, semantic search, unsupported/spoofed/corrupted uploads, real bill → worker → OCR → agent → RAG → recommendation, duplicate 409, audit with citations, admin approval, employee final status, document download | **32/32 pass**; bill processed in 6 s, amount ₹7,000 read correctly |
+| Restart | `docker compose restart api worker`; claim and uploaded file still present | **2/2 pass** |
+| Browser (`scripts/browser_e2e.py`, Chromium) | Employee: empty login form, sign in, upload bill, live status → processed, claim status page, Coverage Assistant with citations. Admin: dashboard, review queue with evidence, policies page + retrieval debugger, mobile layout. Fails on any page error or HTTP 5xx | **10/10 steps pass** |
+| Migrations | `alembic upgrade head → downgrade base → upgrade head` on PostgreSQL 16 | pass (all 9 migrations reversible) |
+| Unit + API tests | Python 3.10 / 3.11 / 3.12 | **118 passed** |
+| Security scans | `pip-audit`, `bandit -ll`, `npm audit --audit-level=high` | pass (accepted items below) |
+
+### Defects found only by testing the deployment
+
+| # | Defect | Severity | Fix |
+| --- | --- | --- | --- |
+| 20 | **Worker container crash-looped**: it imports `Claim` but not `User`, so SQLAlchemy could not resolve `claims.reviewed_by → users.id` (`NoReferencedTableError`). No claim was ever processed in the Docker deployment. The CI end-to-end job ran the worker in-process with every model imported, which hid it | Critical | `models.py` registers the users table; fresh-interpreter regression test |
+| 21 | Production login page pre-filled **demo passwords** and printed them in a hint | High | Passwords removed from frontend source; optional local pre-fill via git-ignored `frontend/.env.local`; smoke test asserts the bundle contains none |
+| 22 | API and worker containers ran as **root** | Medium | Non-root `app` user (uid 10001); writable paths owned by it |
+| 23 | Image pulled the CUDA build of PyTorch (several GB unused on CPU) | Low | CPU-only torch wheel |
+| 24 | 7 high-severity npm advisories (axios, vite, postcss, nanoid, follow-redirects, browserslist, source-map-js) | High | `npm audit fix` within semver ranges; build re-verified |
+
+### Accepted risks (documented, gated)
+
+- **chromadb 1.5.9, 4 advisories in the Chroma HTTP server** (no fixed release exists). Not reachable: the app
+  embeds Chroma in-process and never runs a Chroma server. Details and the deployment rule are in
+  `backend/security/accepted-vulnerabilities.md`. Any *other* Python advisory fails CI.
+- **react-router 6.x, 2 moderate advisories**: the fix requires the breaking v7 upgrade. The CI gate is
+  high+; schedule the v7 migration.
+
+### Before a real (non-demo) deployment
+
+1. Generate secrets: `POSTGRES_PASSWORD`, `SECRET_KEY` (`openssl rand -hex 32`); set `CORS_ORIGINS` and
+   `VITE_API_BASE_URL` to the real HTTPS origins.
+2. **Do not run `seed_demo_users.py`.** Create real accounts instead; the demo passwords are public in this
+   repository.
+3. Put TLS and a reverse proxy in front of ports 8000 and 8080; do not expose PostgreSQL.
+4. Keep `AUTO_DECISION_ENABLED=false` until the system has been evaluated on real, anonymised claims (§17).
+5. The first verification downloads the embedding model (~90 MB) into the `model_cache` volume; allow
+   outbound access to Hugging Face once, or pre-populate the volume.
+6. Back up the `postgres_data`, `claim_uploads`, `policy_uploads` and `chroma_data` volumes.
 
 ---
 
