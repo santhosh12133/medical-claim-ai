@@ -446,6 +446,18 @@ because that needs the owner's account.
 Two small fixes came out of this: login e-mail is now case-insensitive, and the API trusts `X-Forwarded-For`
 only in the proxied production layout, where nothing but Caddy can reach it.
 
+## 21. Web app redesign
+
+The frontend was redesigned (one sign-in page, separate employee and reviewer workspaces, plain-language copy,
+a decision stamp for every outcome, responsive layouts). The browser test was extended to 14 steps: wrong
+password refused, upload with the stamped result, the old status address redirecting to My claims, the claim
+timeline, coverage questions, all claims, approving a claim from the review queue, the policy search test,
+and two phone layouts. It runs against the real backend in the Docker-stack job and on x86 and arm64 servers.
+
+| # | Defect | Severity | Fix |
+| --- | --- | --- | --- |
+| 26 | On arm64 the policy search request hung for 60 s when it followed an earlier model inference on another request thread: the image limited OpenMP to one thread but PyTorch still requested one per core. Reproduced twice on the unchanged code | High on Arm servers (e.g. Oracle Ampere) | `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1` in the image; the same search then took 26 ms (CI run 45063585834) |
+
 ---
 
 ## Resume claim verification

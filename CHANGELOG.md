@@ -4,6 +4,23 @@ All notable project changes should be recorded here for human-readable release h
 
 The repository currently uses commit history as the authoritative implementation history. This file establishes the release-facing format for future versioned releases.
 
+## [2.3.0] - 2026-11-23: Redesigned web app
+
+### Changed
+
+- One sign-in page for every role; the account's role opens the employee or reviewer workspace (the old
+  `/employee/login` and `/admin/login` addresses still work).
+- New design across every page: ruled ledger rows, a decision stamp for every outcome, plain-language copy,
+  icons, responsive layouts down to phones, visible keyboard focus and reduced-motion support.
+- Employee "My claims" and "Claim status" merged into one page with a progress timeline per claim.
+- Reviewer pages: overview with review reasons, review queue with a red-flag filter and plain-language
+  processing steps, all-claims table with totals, policies page with inline delete confirmation.
+
+### Fixed
+
+- Docker image: PyTorch and OpenMP now use one thread per call (`OMP_NUM_THREADS=1`). On arm64 a policy
+  search could hang after an earlier inference on another request thread (found by the extended browser test).
+
 ## [2.1.0] - 2026-11-22 — PostgreSQL vector store, live-LLM check, real-bill evaluation
 
 ### Changed
