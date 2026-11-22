@@ -10,11 +10,13 @@ export function AdminLayout() {
     <AppShell
       title="Admin Control Center"
       roleLabel="Admin"
-      subtitle="Review incoming claims, inspect OCR validation, and approve or reject submissions."
+      subtitle="Review claims with cited policy evidence, manage the policy knowledge base, and monitor automated decisions."
       navItems={[
         { label: 'Overview', to: '/admin/dashboard' },
         { label: 'All Claims', to: '/admin/claims' },
         { label: 'Review Queue', to: '/admin/review' },
+        { label: 'Policies', to: '/admin/policies' },
+        { label: 'Policy Assistant', to: '/admin/assistant' },
       ]}
       actions={<button type="button" className="secondary nav-button" onClick={signOut}>Logout</button>}
     >

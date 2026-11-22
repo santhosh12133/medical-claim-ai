@@ -50,6 +50,16 @@ class PolicyRepository:
         self.db.flush()
         return document
 
+    def active_versions(self, policy_type: str, department: str, exclude_id: int | None = None) -> list[PolicyDocument]:
+        query = self.db.query(PolicyDocument).filter(
+            PolicyDocument.status == "active",
+            PolicyDocument.policy_type == policy_type,
+            PolicyDocument.department == department,
+        )
+        if exclude_id is not None:
+            query = query.filter(PolicyDocument.id != exclude_id)
+        return query.all()
+
     def active_for_claim(self, policy_type: str | None, department: str | None, claim_date=None) -> list[PolicyDocument]:
         query = self.db.query(PolicyDocument).filter(PolicyDocument.status == "active")
         if policy_type:

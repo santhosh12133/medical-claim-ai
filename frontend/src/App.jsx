@@ -7,8 +7,10 @@ import { EmployeeLayout } from './layouts/EmployeeLayout';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { EmployeeLoginPage } from './pages/EmployeeLoginPage';
 import { LandingPage } from './pages/LandingPage';
+import { AssistantPage } from './pages/AssistantPage';
 import { AdminClaimsPage } from './pages/admin/AdminClaimsPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { AdminPoliciesPage } from './pages/admin/AdminPoliciesPage';
 import { AdminReviewPage } from './pages/admin/AdminReviewPage';
 import { EmployeeClaimsPage } from './pages/employee/EmployeeClaimsPage';
 import { EmployeeDashboardPage } from './pages/employee/EmployeeDashboardPage';
@@ -45,6 +47,7 @@ export default function App() {
             <Route path="upload" element={<EmployeeUploadPage />} />
             <Route path="claims" element={<EmployeeClaimsPage />} />
             <Route path="status" element={<EmployeeStatusPage />} />
+            <Route path="assistant" element={<AssistantPage />} />
           </Route>
         </Route>
 
@@ -54,6 +57,8 @@ export default function App() {
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="claims" element={<AdminClaimsPage />} />
             <Route path="review" element={<AdminReviewPage />} />
+            <Route path="policies" element={<AdminPoliciesPage />} />
+            <Route path="assistant" element={<AssistantPage />} />
           </Route>
         </Route>
       </Routes>

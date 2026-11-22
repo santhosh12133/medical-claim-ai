@@ -64,6 +64,9 @@ class ClaimVerificationAudit(Base):
     final_decision_source = Column(String(30), nullable=False, default="deterministic")
     auto_decision = Column(String(30), nullable=False, default="human")
     risk_flags_json = Column(JSON, nullable=False, default=list)
+    extracted_rules_json = Column(JSON, nullable=True)
+    pipeline_version = Column(String(20), nullable=True)
+    latency_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     claim = relationship("Claim")

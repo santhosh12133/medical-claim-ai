@@ -14,7 +14,7 @@ export function EmployeeStatusPage() {
 
   const stage = (claim) => {
     const value = String(claim.status || '').toLowerCase();
-    if (value === 'approved' || value === 'rejected') return 3;
+    if (value === 'approved' || value === 'rejected' || value === 'partially approved') return 3;
     if (claim.policy_decision) return 2;
     return 1;
   };
@@ -29,8 +29,13 @@ export function EmployeeStatusPage() {
             <div className="timeline">
               {['Submitted', 'AI + Policy Review', 'Final Decision'].map((label, index) => <div key={label} className={`timeline-step ${current > index ? 'timeline-step--done' : current === index + 1 ? 'timeline-step--current' : ''}`}><span>{current > index ? '✓' : index + 1}</span><small>{label}</small></div>)}
             </div>
-            <div className="status-summary"><span>Claim amount <strong>₹{claim.amount ?? '—'}</strong></span><span>Policy <strong>{claim.policy_decision || 'Under review'}</strong></span></div>
+            <div className="status-summary">
+              <span>Claim amount <strong>₹{claim.amount ?? '—'}</strong></span>
+              <span>Policy <strong>{claim.policy_decision || 'Under review'}</strong></span>
+              {claim.final_approved_amount != null ? <span>Reimbursed <strong>₹{claim.final_approved_amount}</strong></span> : null}
+            </div>
             {claim.policy_reason ? <p className="hint">{claim.policy_reason}</p> : null}
+            {claim.reviewer_notes ? <p className="hint">Reviewer note: {claim.reviewer_notes}</p> : null}
           </article>;
         }) : <div className="empty-state"><div className="empty-state__icon">✓</div><h3>No claims to track</h3><p>Your submitted claims will appear here.</p></div>}
       </div>

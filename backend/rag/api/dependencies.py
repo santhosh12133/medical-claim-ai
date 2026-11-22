@@ -13,6 +13,7 @@ from rag.services.embedding_service import EmbeddingService
 from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.ingestion_service import PolicyIngestionService
 from rag.services.pdf_parser import PolicyPdfParser
+from rag.services.qa_service import PolicyQAService
 from rag.services.retrieval_service import PolicyRetrievalService
 from rag.services.rule_parser import RuleParser
 from rag.services.verification_service import ClaimVerificationService
@@ -39,7 +40,7 @@ def get_vector_repository_cached() -> ChromaPolicyVectorRepository:
 
 @lru_cache(maxsize=1)
 def get_pdf_parser_cached() -> PolicyPdfParser:
-    return PolicyPdfParser()
+    return PolicyPdfParser(ocr_fallback=get_rag_settings_cached().rag_pdf_ocr_fallback)
 
 
 @lru_cache(maxsize=1)
@@ -84,10 +85,23 @@ def get_policy_ingestion_service(
     )
 
 
-def get_policy_retrieval_service(
-    vector_repository: ChromaPolicyVectorRepository = Depends(get_vector_repository_cached),
-) -> PolicyRetrievalService:
-    return PolicyRetrievalService(vector_repository=vector_repository, settings=get_rag_settings_cached())
+@lru_cache(maxsize=1)
+def get_retrieval_service_cached() -> PolicyRetrievalService:
+    """Singleton so the BM25 index and query-embedding cache are shared across requests."""
+    return PolicyRetrievalService(vector_repository=get_vector_repository_cached(), settings=get_rag_settings_cached())
+
+
+def get_policy_retrieval_service() -> PolicyRetrievalService:
+    return get_retrieval_service_cached()
+
+
+@lru_cache(maxsize=1)
+def get_qa_service_cached() -> PolicyQAService:
+    return PolicyQAService(
+        retrieval_service=get_retrieval_service_cached(),
+        settings=get_rag_settings_cached(),
+        rule_parser=get_rule_parser_cached(),
+    )
 
 
 def get_claim_verification_service(

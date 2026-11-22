@@ -15,3 +15,5 @@ pillow
 python-dotenv
 openai
 httpx
+# Optional: LLM_PROVIDER=anthropic requires the Anthropic SDK
+# anthropic

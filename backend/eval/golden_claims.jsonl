@@ -1,0 +1,34 @@
+# Labelled claims for the demo policy set (rag/evaluation/demo_policies.py).
+# expected_decision: APPROVED | PARTIALLY_APPROVED | REJECTED | HUMAN_REVIEW
+{"id": "dental-within", "treatment": "Root canal treatment", "amount": 8000, "claim_date": "2026-03-10", "expected_policy_type": "Dental", "expected_decision": "APPROVED", "expected_amount": 8000}
+{"id": "dental-over-cap", "treatment": "Dental", "amount": 20000, "claim_date": "2026-03-10", "expected_policy_type": "Dental", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 15000}
+{"id": "dental-cosmetic", "treatment": "Cosmetic teeth whitening", "amount": 5000, "claim_date": "2026-03-10", "expected_policy_type": "Dental", "expected_decision": "REJECTED", "expected_amount": 0}
+{"id": "dental-ytd-partial", "treatment": "Tooth extraction", "amount": 5000, "claim_date": "2026-06-01", "year_to_date_used": 12000, "expected_policy_type": "Dental", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 3000}
+{"id": "dental-ytd-exhausted", "treatment": "Dental filling", "amount": 2000, "claim_date": "2026-09-01", "year_to_date_used": 15000, "expected_policy_type": "Dental", "expected_decision": "REJECTED", "expected_amount": 0}
+{"id": "vision-spectacles", "treatment": "Prescription spectacles", "amount": 6000, "claim_date": "2026-02-02", "expected_policy_type": "Vision", "expected_decision": "APPROVED", "expected_amount": 6000}
+{"id": "vision-cosmetic", "treatment": "Cosmetic eyewear sunglasses", "amount": 3000, "claim_date": "2026-02-02", "expected_policy_type": "Vision", "expected_decision": "REJECTED", "expected_amount": 0}
+{"id": "opd-consult", "treatment": "General physician consultation", "amount": 1500, "claim_date": "2026-04-11", "expected_policy_type": "Opd", "expected_decision": "APPROVED", "expected_amount": 1500}
+{"id": "hosp-over-cap", "treatment": "Hospitalization", "amount": 250000, "claim_date": "2026-05-20", "expected_policy_type": "Hospitalization", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 200000}
+{"id": "hosp-surgery", "treatment": "Appendectomy surgery", "amount": 120000, "claim_date": "2026-05-20", "expected_policy_type": "Hospitalization", "expected_decision": "APPROVED", "expected_amount": 120000}
+{"id": "maternity-delivery", "treatment": "Maternity delivery", "amount": 80000, "claim_date": "2026-07-07", "expected_policy_type": "Maternity", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 75000}
+{"id": "preventive-checkup", "treatment": "Annual health checkup", "amount": 5000, "claim_date": "2026-01-15", "expected_policy_type": "Preventive", "expected_decision": "APPROVED", "expected_amount": 5000}
+{"id": "imaging-mri", "treatment": "MRI scan", "amount": 30000, "claim_date": "2026-08-08", "expected_policy_type": "Diagnostics", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 25000}
+{"id": "lab-blood", "treatment": "Blood test", "amount": 2000, "claim_date": "2026-08-08", "expected_policy_type": "Diagnostics", "expected_decision": "APPROVED", "expected_amount": 2000}
+{"id": "physio", "treatment": "Physiotherapy sessions", "amount": 12000, "claim_date": "2026-03-03", "expected_policy_type": "Physiotherapy", "expected_decision": "APPROVED", "expected_amount": 12000}
+{"id": "mental", "treatment": "Psychologist counselling", "amount": 9000, "claim_date": "2026-03-03", "expected_policy_type": "Mental Wellness", "expected_decision": "APPROVED", "expected_amount": 9000}
+{"id": "pharmacy", "treatment": "Prescription medicines", "amount": 4000, "claim_date": "2026-03-03", "expected_policy_type": "Pharmacy", "expected_decision": "APPROVED", "expected_amount": 4000}
+{"id": "emergency-over", "treatment": "Emergency room visit", "amount": 60000, "claim_date": "2026-10-01", "expected_policy_type": "Emergency", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 50000}
+{"id": "accident", "treatment": "Fracture after road accident", "amount": 90000, "claim_date": "2026-10-01", "expected_policy_type": "Accident", "expected_decision": "APPROVED", "expected_amount": 90000}
+{"id": "chronic", "treatment": "Hypertension management", "amount": 10000, "claim_date": "2026-02-14", "expected_policy_type": "Chronic Care", "expected_decision": "APPROVED", "expected_amount": 10000}
+{"id": "diabetes-over", "treatment": "Diabetes insulin", "amount": 26000, "claim_date": "2026-02-14", "expected_policy_type": "Diabetes", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 25000}
+{"id": "cardiac", "treatment": "Cardiac angiography", "amount": 100000, "claim_date": "2026-06-30", "expected_policy_type": "Cardiac", "expected_decision": "APPROVED", "expected_amount": 100000}
+{"id": "ortho-over", "treatment": "Knee ligament orthopedic procedure", "amount": 85000, "claim_date": "2026-06-30", "expected_policy_type": "Orthopedic", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 80000}
+{"id": "derma", "treatment": "Acne dermatology treatment", "amount": 3000, "claim_date": "2026-06-30", "expected_policy_type": "Dermatology", "expected_decision": "APPROVED", "expected_amount": 3000}
+{"id": "derma-cosmetic", "treatment": "Cosmetic botox dermatology", "amount": 10000, "claim_date": "2026-06-30", "expected_policy_type": "Dermatology", "expected_decision": "REJECTED", "expected_amount": 0}
+{"id": "ent-over", "treatment": "Sinus ENT treatment", "amount": 21000, "claim_date": "2026-06-30", "expected_policy_type": "Ent", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 20000}
+{"id": "home-nursing", "treatment": "Home nursing", "amount": 30000, "claim_date": "2026-06-30", "expected_policy_type": "Home Healthcare", "expected_decision": "APPROVED", "expected_amount": 30000}
+{"id": "rehab-over", "treatment": "Occupational therapy rehabilitation", "amount": 70000, "claim_date": "2026-06-30", "expected_policy_type": "Rehabilitation", "expected_decision": "PARTIALLY_APPROVED", "expected_amount": 60000}
+{"id": "pediatric", "treatment": "Child vaccination", "amount": 4000, "claim_date": "2026-06-30", "expected_policy_type": "Pediatric", "expected_decision": "APPROVED", "expected_amount": 4000}
+{"id": "women", "treatment": "Gynecology pap smear", "amount": 2500, "claim_date": "2026-06-30", "expected_policy_type": "Women Wellness", "expected_decision": "APPROVED", "expected_amount": 2500}
+{"id": "wellness", "treatment": "Yoga wellness program", "amount": 5000, "claim_date": "2026-06-30", "expected_policy_type": "Wellness", "expected_decision": "APPROVED", "expected_amount": 5000}
+{"id": "unknown-treatment", "treatment": "Acupuncture", "amount": 3000, "claim_date": "2026-06-30", "expected_decision": "HUMAN_REVIEW", "expected_amount": 0}

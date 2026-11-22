@@ -1,3 +1,51 @@
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg2://medical_claims:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/medical_claims
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+  UPLOAD_DIR: /app/uploads
+  MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
+  # --- RAG pipeline ---
+  RAG_ENABLED: ${RAG_ENABLED:-true}
+  RAG_UPLOAD_DIR: /app/policy_uploads
+  RAG_CHROMA_PATH: /app/chroma
+  RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
+  RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+  RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-180}
+  RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-30}
+  RAG_TOP_K: ${RAG_TOP_K:-5}
+  RAG_CANDIDATE_POOL: ${RAG_CANDIDATE_POOL:-20}
+  RAG_HYBRID_ENABLED: ${RAG_HYBRID_ENABLED:-true}
+  RAG_RERANKER: ${RAG_RERANKER:-heuristic}
+  RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.30}
+  RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0.55}
+  RAG_OVER_LIMIT_POLICY: ${RAG_OVER_LIMIT_POLICY:-partial}
+  RAG_USE_ANNUAL_UTILIZATION: ${RAG_USE_ANNUAL_UTILIZATION:-true}
+  RAG_MAX_UPLOAD_SIZE_MB: ${RAG_MAX_UPLOAD_SIZE_MB:-20}
+  RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
+  RAG_LOG_DIR: /app/logs
+  # --- LLM (optional) ---
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  GPT_DECISION_ENABLED: ${GPT_DECISION_ENABLED:-false}
+  GPT_DECISION_MODEL: ${GPT_DECISION_MODEL:-gpt-5.6-luna}
+  GPT_DECISION_TIMEOUT_SECONDS: ${GPT_DECISION_TIMEOUT_SECONDS:-20}
+  LLM_QA_ENABLED: ${LLM_QA_ENABLED:-false}
+  LLM_REDACT_PII: ${LLM_REDACT_PII:-true}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+  # --- Autonomous decisions (keep off until evaluated) ---
+  AUTO_DECISION_ENABLED: ${AUTO_DECISION_ENABLED:-false}
+  AUTO_DECISION_MIN_CONFIDENCE: ${AUTO_DECISION_MIN_CONFIDENCE:-0.85}
+  AUTO_DECISION_REQUIRE_GPT: ${AUTO_DECISION_REQUIRE_GPT:-false}
+  AUTO_DECISION_MAX_AMOUNT: ${AUTO_DECISION_MAX_AMOUNT:-}
+
+x-backend-volumes: &backend-volumes
+  - claim_uploads:/app/uploads
+  - policy_uploads:/app/policy_uploads
+  - chroma_data:/app/chroma
+  - app_logs:/app/logs
+  - model_cache:/root/.cache
+
 services:
   db:
     image: postgres:16-alpine
@@ -21,38 +69,9 @@ services:
       context: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg2://medical_claims:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/medical_claims
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      <<: *backend-env
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
-      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
-      UPLOAD_DIR: /app/uploads
-      RAG_ENABLED: ${RAG_ENABLED:-true}
-      RAG_UPLOAD_DIR: /app/policy_uploads
-      RAG_CHROMA_PATH: /app/chroma
-      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
-      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
-      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-1200}
-      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-150}
-      RAG_TOP_K: ${RAG_TOP_K:-5}
-      RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.45}
-      RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0.55}
-      RAG_MAX_UPLOAD_SIZE_MB: ${RAG_MAX_UPLOAD_SIZE_MB:-20}
-      RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
-      RAG_LOG_DIR: /app/logs
-      GPT_DECISION_ENABLED: ${GPT_DECISION_ENABLED:-false}
-      GPT_DECISION_MODEL: ${GPT_DECISION_MODEL:-gpt-5.6-luna}
-      GPT_DECISION_TIMEOUT_SECONDS: ${GPT_DECISION_TIMEOUT_SECONDS:-20}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AUTO_DECISION_ENABLED: ${AUTO_DECISION_ENABLED:-false}
-      AUTO_DECISION_MIN_CONFIDENCE: ${AUTO_DECISION_MIN_CONFIDENCE:-0.85}
-      AUTO_DECISION_REQUIRE_GPT: ${AUTO_DECISION_REQUIRE_GPT:-false}
-      AUTO_DECISION_MAX_AMOUNT: ${AUTO_DECISION_MAX_AMOUNT:-}
-    volumes:
-      - claim_uploads:/app/uploads
-      - policy_uploads:/app/policy_uploads
-      - chroma_data:/app/chroma
-      - app_logs:/app/logs
+    volumes: *backend-volumes
     ports:
       - "8000:8000"
     depends_on:
@@ -71,38 +90,16 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
-    command: ["python", "scripts/claim_worker.py", "--batch-size", "8", "--workers", "4", "--poll-seconds", "2", "--max-attempts", "3"]
+    command: ["python", "scripts/claim_worker.py"]
     environment:
-      DATABASE_URL: postgresql+psycopg2://medical_claims:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/medical_claims
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
-      UPLOAD_DIR: /app/uploads
-      RAG_ENABLED: ${RAG_ENABLED:-true}
-      RAG_UPLOAD_DIR: /app/policy_uploads
-      RAG_CHROMA_PATH: /app/chroma
-      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
-      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
-      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-1200}
-      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-150}
-      RAG_TOP_K: ${RAG_TOP_K:-5}
-      RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.45}
-      RAG_MIN_CONFIDENCE: ${RAG_MIN_CONFIDENCE:-0.55}
-      RAG_MAX_UPLOAD_SIZE_MB: ${RAG_MAX_UPLOAD_SIZE_MB:-20}
-      RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
-      RAG_LOG_DIR: /app/logs
-      GPT_DECISION_ENABLED: ${GPT_DECISION_ENABLED:-false}
-      GPT_DECISION_MODEL: ${GPT_DECISION_MODEL:-gpt-5.6-luna}
-      GPT_DECISION_TIMEOUT_SECONDS: ${GPT_DECISION_TIMEOUT_SECONDS:-20}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AUTO_DECISION_ENABLED: ${AUTO_DECISION_ENABLED:-false}
-      AUTO_DECISION_MIN_CONFIDENCE: ${AUTO_DECISION_MIN_CONFIDENCE:-0.85}
-      AUTO_DECISION_REQUIRE_GPT: ${AUTO_DECISION_REQUIRE_GPT:-false}
-      AUTO_DECISION_MAX_AMOUNT: ${AUTO_DECISION_MAX_AMOUNT:-}
-    volumes:
-      - claim_uploads:/app/uploads
-      - policy_uploads:/app/policy_uploads
-      - chroma_data:/app/chroma
-      - app_logs:/app/logs
+      <<: *backend-env
+      CLAIM_WORKER_BATCH_SIZE: ${CLAIM_WORKER_BATCH_SIZE:-8}
+      CLAIM_WORKER_CONCURRENCY: ${CLAIM_WORKER_CONCURRENCY:-4}
+      CLAIM_WORKER_POLL_SECONDS: ${CLAIM_WORKER_POLL_SECONDS:-2}
+      CLAIM_WORKER_MAX_ATTEMPTS: ${CLAIM_WORKER_MAX_ATTEMPTS:-3}
+      CLAIM_WORKER_LEASE_MINUTES: ${CLAIM_WORKER_LEASE_MINUTES:-15}
+      CLAIM_AUTO_VERIFY: ${CLAIM_AUTO_VERIFY:-true}
+    volumes: *backend-volumes
     depends_on:
       db:
         condition: service_healthy
@@ -131,6 +128,7 @@ volumes:
   policy_uploads:
   chroma_data:
   app_logs:
+  model_cache:
 
 networks:
   medical_claims:

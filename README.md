@@ -130,21 +130,27 @@ Worker
 
 ```text
 Policy PDF
-  -> validate
-  -> parse text
-  -> chunk
-  -> embed
-  -> ChromaDB
-  -> active policy metadata in PostgreSQL
+  -> validate (signature, size, SHA-256 duplicate check)
+  -> page-aware text extraction (+ OCR fallback for scanned pages, mojibake repair)
+  -> header/footer removal
+  -> sentence-packing chunker sized for the embedder (sections + page numbers kept)
+  -> contextual chunk headers ("Policy: ... | Section: ...") -> embeddings
+  -> ChromaDB (vectors) + PostgreSQL (chunks, versions, lifecycle)
+  -> optional supersession of older versions
 
 Claim
-  -> metadata-aware retrieval
-  -> similarity threshold
-  -> deterministic rule parser
-  -> deterministic baseline
-  -> optional GPT assessment
-  -> guarded decision engine
+  -> treatment taxonomy (e.g. "RCT" -> Dental) + query expansion
+  -> hybrid retrieval: dense vectors + BM25, reciprocal rank fusion, reranking
+  -> effective-date and active-status filtering
+  -> structured rule extraction (cap + period, co-pay, %, exclusions, pre-auth, deadlines)
+  -> year-to-date utilisation against annual limits
+  -> deterministic adjudication (approve / partial / reject / human review)
+  -> optional LLM cross-check (OpenAI or Anthropic; PII-redacted, must cite evidence)
+  -> guarded decision engine (blocking risk flags, confidence threshold, amount ceiling)
+  -> audit record + claim timeline
 ```
+
+See [`docs/rag-pipeline.md`](docs/rag-pipeline.md) for the full design and the evaluation results.
 
 ---
 
@@ -229,6 +235,8 @@ See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
 - asynchronous processing status
 - claim history
 - policy decision summary
+- live processing status after upload (extracted fields + policy check)
+- **Coverage Assistant**: ask "is a ₹30,000 MRI covered?" and get a cited answer plus a coverage estimate
 
 ### Administrator
 
@@ -238,19 +246,26 @@ See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
 - verification audit history
 - decision and processing metrics
 - claim activity timeline
+- review queue with cited evidence, confidence breakdown, extracted rule and risk flags
+- approve with an adjusted amount and reviewer notes; reprocess; view the original bill
+- policy knowledge-base page: upload, activate/archive, re-index, delete
+- retrieval debugger showing vector, BM25, RRF and rerank scores per chunk
 
 ### Intelligence and automation
 
-- multi-engine OCR stack
-- deterministic field validation
-- semantic policy retrieval
-- treatment/department-aware filtering
-- policy lifecycle and version tracking
-- SHA-256 duplicate policy detection
-- deterministic reimbursement-rule parsing
-- optional evidence-constrained GPT assessment
-- guarded autonomous decision engine
-- human-review escalation
+- multi-engine OCR stack with image pre-processing
+- deterministic field validation (net payable, invoice number, patient name, multiple date formats)
+- hybrid retrieval (dense + BM25 + reciprocal rank fusion + reranking)
+- treatment taxonomy with synonym expansion (extensible via `RAG_TAXONOMY_PATH`)
+- policy lifecycle, version supersession and effective-date filtering
+- SHA-256 duplicate policy and duplicate claim-document detection
+- structured reimbursement-rule extraction and partial approvals
+- annual-limit tracking from previously approved claims
+- fraud/risk checks: duplicate invoices, future-dated bills, patient-name mismatch
+- optional LLM assessment (OpenAI or Anthropic) with PII redaction, prompt-injection guard and citation checks
+- grounded policy Q&A with citations (works offline in extractive mode)
+- guarded autonomous decision engine with blocking flags
+- offline evaluation harness and CI quality gate
 
 ---
 
@@ -427,9 +442,12 @@ GET  /auth/me
 POST  /claims/upload
 GET   /claims
 GET   /claims/{claim_id}
+GET   /claims/summary                     # admin dashboard aggregates
 GET   /claims/{claim_id}/events
-PATCH /claims/{claim_id}/approve
-PATCH /claims/{claim_id}/reject
+GET   /claims/{claim_id}/document           # original bill (owner or admin)
+PATCH /claims/{claim_id}/approve            # optional body: {approved_amount, notes}
+PATCH /claims/{claim_id}/reject             # optional body: {notes}
+POST  /claims/{claim_id}/reprocess
 ```
 
 ### Policies and verification
@@ -438,14 +456,22 @@ PATCH /claims/{claim_id}/reject
 POST  /rag/policies/ingest
 GET   /rag/policies
 GET   /rag/policies/{policy_document_id}
-PATCH /rag/policies/{policy_document_id}/status
-POST  /rag/claims/verify
-POST  /rag/claims/{claim_id}/verify
-GET   /rag/verifications
-GET   /rag/metrics/decisions
+PATCH  /rag/policies/{policy_document_id}/status
+POST   /rag/policies/{policy_document_id}/reindex
+DELETE /rag/policies/{policy_document_id}
+POST   /rag/claims/verify
+POST   /rag/claims/{claim_id}/verify
+GET    /rag/claims/{claim_id}/verifications
+GET    /rag/verifications
+GET    /rag/verifications/{audit_id}
+GET    /rag/metrics/decisions
+POST   /rag/search                           # retrieval debugger
+GET    /rag/health
+POST   /rag/ask                              # policy Q&A with citations (any signed-in user)
+GET    /rag/taxonomy                         # treatment categories (any signed-in user)
 ```
 
-All policy administration and verification-management endpoints require authenticated administrator access.
+Policy administration and verification endpoints require administrator access; `/rag/ask` and `/rag/taxonomy` are available to employees too.
 
 See the full contract in [`docs/api-reference.md`](docs/api-reference.md).
 
@@ -459,7 +485,25 @@ The project uses layered verification rather than a single "works on my machine"
 
 ```bash
 cd backend
-pytest
+pytest                      # unit tests; API/integration tests run when FastAPI + SQLAlchemy are installed
+flake8 .                    # config in setup.cfg
+```
+
+### RAG quality gate
+
+```bash
+python scripts/evaluate_rag.py                       # offline, BM25-only, no database needed
+python scripts/evaluate_rag.py --embeddings          # full hybrid retrieval
+python scripts/evaluate_rag.py --min-decision-accuracy 0.95 --max-unsafe-rate 0   # used in CI
+```
+
+The labelled set lives in `backend/eval/golden_claims.jsonl`. Extend it with real (anonymised) claims before enabling autonomous decisions.
+
+### Upgrading an existing deployment
+
+```bash
+alembic upgrade head                 # migration 0009 adds claim risk/review fields and audit details
+python scripts/reindex_policies.py   # re-chunk policies stored with the old 1,200-word chunks
 ```
 
 ### Decision engine benchmark

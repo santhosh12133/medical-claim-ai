@@ -1,4 +1,4 @@
-name: Backend CI
+name: CI
 
 on:
   push:
@@ -36,13 +36,14 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip check
 
-      - name: Lint
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --max-complexity=10 --max-line-length=127 --ignore=E402,W292 --statistics
+      - name: Lint (config in backend/setup.cfg)
+        run: flake8 . --count --statistics
 
-      - name: Test
+      - name: Unit and integration tests
         run: pytest -q
+
+      - name: RAG quality gate (offline golden set)
+        run: python scripts/evaluate_rag.py --min-hit-rate 0.95 --min-decision-accuracy 0.95 --max-unsafe-rate 0
 
   frontend:
     runs-on: ubuntu-latest
@@ -57,7 +58,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

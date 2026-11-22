@@ -12,10 +12,22 @@ class VerificationRepository:
         self.db.flush()
         return audit
 
-    def list_audits(self, limit: int = 50) -> list[ClaimVerificationAudit]:
+    def get_audit(self, audit_id: int) -> ClaimVerificationAudit | None:
+        return self.db.get(ClaimVerificationAudit, audit_id)
+
+    def list_audits(
+        self,
+        limit: int = 50,
+        claim_id: int | None = None,
+        decision: str | None = None,
+    ) -> list[ClaimVerificationAudit]:
+        query = self.db.query(ClaimVerificationAudit)
+        if claim_id is not None:
+            query = query.filter(ClaimVerificationAudit.claim_id == claim_id)
+        if decision:
+            query = query.filter(ClaimVerificationAudit.decision == decision)
         return (
-            self.db.query(ClaimVerificationAudit)
-            .order_by(ClaimVerificationAudit.created_at.desc())
+            query.order_by(ClaimVerificationAudit.created_at.desc(), ClaimVerificationAudit.id.desc())
             .limit(limit)
             .all()
         )

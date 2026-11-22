@@ -1,27 +1,43 @@
+"""Claim verification orchestrator.
+
+retrieve (hybrid) -> select rule -> utilisation -> adjudicate (deterministic)
+-> optional LLM cross-check -> decision engine safety gate -> audit + claim update
+"""
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import time
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import Claim
-from rag.config.settings import RagSettings, get_rag_settings
+from rag.config.settings import PIPELINE_VERSION, RagSettings, get_rag_settings
 from rag.db.models import ClaimVerificationAudit
-from rag.domain import ParsedPolicyRule, RetrievalHit
+from rag.decisions import BLOCKING_FLAGS, FINAL_DECISIONS, REJECTED, claim_status_for, display_decision
+from rag.domain import RetrievalHit
 from rag.exceptions import ClaimVerificationError
+from rag.llm.guardrails import GuardrailReport
 from rag.repositories.verification_repository import VerificationRepository
 from rag.schemas.verification import (
     ClaimVerificationRequest,
     ClaimVerificationResponse,
     GPTDecisionAssessment,
-    PolicyRetrievalHit,
 )
-from rag.services.decision_engine import ClaimDecisionEngine
+from rag.services.adjudication import AdjudicationResult, Adjudicator, ClaimFacts
+from rag.services.decision_engine import ClaimDecisionEngine, DecisionResult
 from rag.services.gpt_decision_service import GPTDecisionService
+from rag.services.presenters import hit_schema as _hit_schema
+from rag.services.presenters import policy_source as _policy_source
 from rag.services.retrieval_service import PolicyRetrievalService
-from rag.services.rule_parser import RuleParser
+from rag.services.rule_parser import RuleParser, RuleSelection
+from services.claim_events import record_claim_event
+
+_PAID_STATUSES = ("Approved", "Partially Approved")
+_REVIEWABLE_STATUSES = {"Pending", "Pending Review", "Needs Attention", "Processing"}
 
 
 class ClaimVerificationService:
@@ -40,6 +56,7 @@ class ClaimVerificationService:
         self.rule_parser = rule_parser
         self.settings = settings or get_rag_settings()
         self.gpt_decision_service = gpt_decision_service or GPTDecisionService(self.settings)
+        self.adjudicator = Adjudicator(self.settings.rag_over_limit_policy)
         self.decision_engine = ClaimDecisionEngine(
             enabled=self.settings.auto_decision_enabled,
             min_confidence=self.settings.auto_decision_min_confidence,
@@ -48,92 +65,40 @@ class ClaimVerificationService:
         )
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    # ------------------------------------------------------------------ public
     def verify(
         self,
         request: ClaimVerificationRequest,
         claim_id: int | None = None,
         update_claim_summary: bool = False,
     ) -> ClaimVerificationResponse:
+        started = time.perf_counter()
         effective_claim_id = claim_id or request.claim_id
         try:
-            if effective_claim_id is not None and self.db.get(Claim, effective_claim_id) is None:
+            claim = self.db.get(Claim, effective_claim_id) if effective_claim_id is not None else None
+            if effective_claim_id is not None and claim is None:
                 raise ClaimVerificationError(f"Claim {effective_claim_id} was not found")
 
-            retrieval_hits = self.retrieval_service.retrieve(request)
-            if not retrieval_hits:
-                return self._save_and_return(
-                    request=request,
-                    claim_id=effective_claim_id,
-                    update_claim_summary=update_claim_summary,
-                    retrieval_hits=[],
-                    decision="Needs Human Review",
-                    approved_amount=Decimal("0.00"),
-                    confidence=0.35,
-                    policy_source="No matching policy found",
-                    policy_used="No policy clause could be retrieved",
-                    reason="No relevant reimbursement policy was found in the vector store",
-                    decision_trace=["No retrieval hits were returned"],
-                    selected_document_id=None,
-                    parsed_rule=None,
-                )
-
-            selected_hit, parsed_rule = self._select_best_rule(retrieval_hits, request.treatment)
-            if selected_hit is None or parsed_rule is None or parsed_rule.limit_amount is None:
-                return self._save_and_return(
-                    request=request,
-                    claim_id=effective_claim_id,
-                    update_claim_summary=update_claim_summary,
-                    retrieval_hits=retrieval_hits,
-                    decision="Needs Human Review",
-                    approved_amount=Decimal("0.00"),
-                    confidence=0.45,
-                    policy_source=self._policy_source_from_hit(retrieval_hits[0]),
-                    policy_used=retrieval_hits[0].chunk_text,
-                    reason="A relevant policy was retrieved, but the reimbursement limit could not be parsed safely",
-                    decision_trace=[
-                        f"Retrieved {len(retrieval_hits)} candidate policy chunks",
-                        "No deterministic reimbursement limit could be extracted",
-                    ],
-                    selected_document_id=retrieval_hits[0].policy_document_id,
-                    parsed_rule=parsed_rule,
-                )
-
-            claim_amount = Decimal(str(request.amount))
-            limit_amount = parsed_rule.limit_amount
-            approved_amount = min(claim_amount, limit_amount)
-            if claim_amount <= limit_amount:
-                decision = "Approved"
-                reason = "Claim amount is within the reimbursement limit"
-            else:
-                decision = "Rejected"
-                reason = "Claim exceeds maximum reimbursement limit"
-
-            confidence = self._score_confidence(selected_hit, parsed_rule)
-            decision_trace = [
-                f"Retrieved {len(retrieval_hits)} policy chunks from ChromaDB",
-                f"Selected policy chunk similarity: {selected_hit.similarity:.2f}",
-                f"Parsed reimbursement limit: {limit_amount}",
-                f"Claim amount compared against limit: {claim_amount} vs {limit_amount}",
-            ]
-
-            return self._save_and_return(
-                request=request,
-                claim_id=effective_claim_id,
-                update_claim_summary=update_claim_summary,
-                retrieval_hits=retrieval_hits,
-                decision=decision,
-                approved_amount=approved_amount,
-                confidence=confidence,
-                policy_source=self._policy_source_from_hit(selected_hit),
-                policy_used=parsed_rule.policy_clause,
-                reason=reason,
-                decision_trace=decision_trace,
-                selected_document_id=selected_hit.policy_document_id,
-                parsed_rule=parsed_rule,
+            query = self.retrieval_service.build_query(request)
+            hits, diagnostics = self.retrieval_service.search_with_diagnostics(query)
+            selection = (
+                self.rule_parser.select_rule(hits, request.treatment, query.category) if hits else RuleSelection(None, None)
             )
+            utilization = self._utilization(claim, query.category, selection.hit)
+            facts = ClaimFacts(
+                treatment=request.treatment,
+                amount=Decimal(str(request.amount)),
+                claim_date=request.claim_date,
+                submitted_on=_submitted_on(claim),
+                category=query.category,
+            )
+            adjudication = self.adjudicator.adjudicate(facts, selection, utilization)
+            return self._finalise(request, claim, update_claim_summary, hits, selection, adjudication,
+                                  diagnostics.as_dict(), query.category, started)
         except ClaimVerificationError:
             raise
         except Exception as exc:  # pragma: no cover - defensive orchestration guard
+            self.db.rollback()
             self.logger.exception("Claim verification failed")
             raise ClaimVerificationError("Claim verification failed") from exc
 
@@ -153,149 +118,163 @@ class ClaimVerificationService:
             treatment=claim.treatment,
             amount=claim.amount,
             claim_date=claim.claim_date,
-            policy_type=claim.treatment,
+            # The category is resolved from the treatment by the taxonomy (a soft
+            # signal). Passing the raw treatment as a hard policy_type filter was
+            # the bug that made most claims retrieve nothing.
+            policy_type=None,
             department="Medical",
         )
         return self.verify(request, claim_id=claim.id, update_claim_summary=True)
 
-    def _select_best_rule(
-        self,
-        retrieval_hits: list[RetrievalHit],
-        treatment: str,
-    ) -> tuple[RetrievalHit | None, ParsedPolicyRule | None]:
-        for hit in retrieval_hits:
-            parsed_rule = self.rule_parser.parse(hit.chunk_text, treatment=treatment)
-            if parsed_rule and parsed_rule.limit_amount is not None:
-                return hit, parsed_rule
-
-        first_hit = retrieval_hits[0] if retrieval_hits else None
-        if first_hit is None:
-            return None, None
-        return first_hit, self.rule_parser.parse(first_hit.chunk_text, treatment=treatment)
-
-    def _score_confidence(self, hit: RetrievalHit, parsed_rule: ParsedPolicyRule) -> float:
-        base_score = max(0.0, min(1.0, hit.similarity))
-        rule_score = max(0.0, min(1.0, parsed_rule.confidence))
-        confidence = round(min(0.99, 0.55 * base_score + 0.45 * rule_score), 2)
-        return max(self.settings.rag_min_confidence, confidence)
-
-    def _policy_source_from_hit(self, hit: RetrievalHit) -> str:
-        policy_type = hit.metadata.get("policy_type", "Unknown")
-        policy_version = hit.metadata.get("policy_version", "1.0")
-        title = hit.metadata.get("title", "Policy")
-        source_filename = hit.metadata.get("source_filename", "unknown.pdf")
-        return f"{title} | {policy_type} v{policy_version} | {source_filename}"
-
-    def _save_and_return(
-        self,
-        request: ClaimVerificationRequest,
-        claim_id: int | None,
-        update_claim_summary: bool,
-        retrieval_hits: list[RetrievalHit],
-        decision: str,
-        approved_amount: Decimal,
-        confidence: float,
-        policy_source: str,
-        policy_used: str,
-        reason: str,
-        decision_trace: list[str],
-        selected_document_id: int | None,
-        parsed_rule: ParsedPolicyRule | None,
-    ) -> ClaimVerificationResponse:
+    # --------------------------------------------------------------- pipeline
+    def _finalise(self, request, claim, update_claim_summary, hits, selection, adjudication: AdjudicationResult,
+                  diagnostics: dict, category: str | None, started: float) -> ClaimVerificationResponse:
+        report = GuardrailReport()
         gpt_raw = self.gpt_decision_service.decide(
             treatment=request.treatment,
             claim_amount=Decimal(str(request.amount)),
-            deterministic_decision=decision,
-            deterministic_approved_amount=approved_amount,
-            deterministic_reason=reason,
-            parsed_rule=parsed_rule,
-            retrieval_hits=retrieval_hits,
+            deterministic_decision=adjudication.decision,
+            deterministic_approved_amount=adjudication.approved_amount,
+            deterministic_reason=adjudication.reason,
+            parsed_rule=selection.rule,
+            retrieval_hits=hits,
+            guardrail_report=report,
         )
-        gpt_assessment = self._build_gpt_assessment(gpt_raw, decision_trace)
-        decision_result = self.decision_engine.resolve(
-            deterministic_decision=decision,
-            deterministic_amount=approved_amount,
-            deterministic_confidence=confidence,
-            deterministic_reason=reason,
+        trace = list(adjudication.trace)
+        gpt_assessment = self._build_gpt_assessment(gpt_raw, trace)
+        claim_flags = [str(flag) for flag in (getattr(claim, "risk_flags_json", None) or [])]
+        blocking = [*adjudication.flags, *claim_flags, *report.flags]
+        result = self.decision_engine.resolve(
+            deterministic_decision=adjudication.decision,
+            deterministic_amount=adjudication.approved_amount,
+            deterministic_confidence=adjudication.confidence,
+            deterministic_reason=adjudication.reason,
             gpt_assessment=gpt_raw if gpt_assessment else None,
+            blocking_flags=blocking,
         )
-        final_decision = self._display_decision(decision_result.decision)
-        final_amount = decision_result.approved_amount
-        final_confidence = decision_result.confidence
-        final_reason = self._final_reason(decision_result.reason, reason)
-        decision_trace.append(
-            f"Decision engine: {final_decision} ({final_confidence:.2f})"
-        )
-        if decision_result.flags:
-            decision_trace.append(f"Decision flags: {', '.join(decision_result.flags)}")
+        final_decision = display_decision(result.decision)
+        flags = list(dict.fromkeys([*adjudication.flags, *claim_flags, *result.flags]))
+        trace.append(f"Decision engine: {final_decision} ({result.confidence:.2f})"
+                     + (" [autonomous]" if result.autonomous else " [advisory]"))
+        if flags:
+            trace.append(f"Decision flags: {', '.join(flags)}")
 
+        selected = selection.hit
+        policy_source = _policy_source(selected) if selected else "No matching policy found"
+        policy_used = (selection.rule.policy_clause if selection.rule else (selected.chunk_text if selected
+                       else "No policy clause could be retrieved"))
+        latency_ms = int((time.perf_counter() - started) * 1000)
         response = ClaimVerificationResponse(
-            claim_id=claim_id,
+            claim_id=claim.id if claim else request.claim_id,
             status=final_decision,
-            approved_amount=final_amount,
-            confidence=final_confidence,
+            approved_amount=result.approved_amount,
+            confidence=result.confidence,
             policy_used=policy_used,
             policy_source=policy_source,
-            reason=final_reason,
-            retrieved_policies=[
-                PolicyRetrievalHit(
-                    chunk_id=hit.chunk_id,
-                    policy_document_id=hit.policy_document_id,
-                    chunk_index=hit.chunk_index,
-                    chunk_text=hit.chunk_text,
-                    similarity=round(hit.similarity, 4),
-                    policy_type=hit.metadata.get("policy_type", "Unknown"),
-                    policy_version=hit.metadata.get("policy_version", "1.0"),
-                    department=hit.metadata.get("department", "Medical"),
-                    source_filename=hit.metadata.get("source_filename", "unknown.pdf"),
-                    title=hit.metadata.get("title", "Policy"),
-                )
-                for hit in retrieval_hits
-            ],
-            decision_trace=decision_trace,
+            reason=result.reason,
+            retrieved_policies=[_hit_schema(hit) for hit in hits],
+            decision_trace=trace,
             gpt_assessment=gpt_assessment,
+            category=category,
+            deterministic_decision=display_decision(adjudication.decision),
+            extracted_rule=selection.rule.as_dict() if selection.rule else None,
+            flags=flags,
+            confidence_breakdown=adjudication.confidence_breakdown,
+            autonomous=result.autonomous,
+            retrieval=diagnostics,
+            pipeline_version=PIPELINE_VERSION,
+            latency_ms=latency_ms,
         )
-
-        audit = ClaimVerificationAudit(
-            claim_id=claim_id,
-            policy_document_id=selected_document_id,
-            claim_payload_json=request.model_dump(mode="json"),
-            retrieved_chunks_json=[hit.model_dump(mode="json") for hit in response.retrieved_policies],
-            decision=final_decision,
-            approved_amount=final_amount,
-            confidence=final_confidence,
-            policy_source=policy_source,
-            policy_used=policy_used,
-            reason=final_reason,
-            decision_trace_json=decision_trace,
-            deterministic_decision=decision,
-            deterministic_confidence=Decimal(str(confidence)),
-            gpt_decision=(gpt_assessment.decision if gpt_assessment else None),
-            gpt_confidence=(Decimal(str(gpt_assessment.confidence)) if gpt_assessment else None),
-            final_decision_source="decision_engine" if self.settings.auto_decision_enabled else "deterministic",
-            auto_decision=("approved" if final_decision == "Approved" else "rejected" if final_decision == "Rejected" else "human"),
-            risk_flags_json=decision_result.flags,
-        )
-        self.verification_repository.save_audit(audit)
-
-        if update_claim_summary and claim_id is not None:
-            claim = self.db.get(Claim, claim_id)
-            if claim is not None:
-                claim.policy_decision = final_decision
-                claim.policy_approved_amount = final_amount
-                claim.policy_confidence = Decimal(str(final_confidence))
-                claim.policy_source = policy_source
-                claim.policy_reason = final_reason
-                claim.policy_checked_at = datetime.now(timezone.utc)
-                if final_decision == "Rejected":
-                    claim.status = "Needs Attention"
-                elif final_decision == "Approved" and claim.status in {"Pending", "Needs Attention"}:
-                    claim.status = "Pending Review"
-
+        self._save_audit(request, claim, response, adjudication, result, gpt_assessment, selection, flags)
+        if update_claim_summary and claim is not None:
+            self._update_claim(claim, response, result, category)
         self.db.commit()
-        self.db.refresh(audit)
         return response
 
+    def _save_audit(self, request, claim, response, adjudication, result: DecisionResult, gpt_assessment,
+                    selection, flags) -> None:
+        source = "deterministic"
+        if self.settings.auto_decision_enabled:
+            source = "decision_engine+llm" if gpt_assessment else "decision_engine"
+        audit = ClaimVerificationAudit(
+            claim_id=claim.id if claim else None,
+            policy_document_id=selection.hit.policy_document_id if selection.hit else None,
+            claim_payload_json=request.model_dump(mode="json"),
+            retrieved_chunks_json=[hit.model_dump(mode="json") for hit in response.retrieved_policies],
+            decision=response.status,
+            approved_amount=response.approved_amount,
+            confidence=Decimal(str(round(response.confidence, 4))),
+            policy_source=response.policy_source[:255],
+            policy_used=response.policy_used,
+            reason=response.reason,
+            decision_trace_json=response.decision_trace,
+            deterministic_decision=display_decision(adjudication.decision),
+            deterministic_confidence=Decimal(str(round(adjudication.confidence, 4))),
+            gpt_decision=gpt_assessment.decision if gpt_assessment else None,
+            gpt_confidence=Decimal(str(gpt_assessment.confidence)) if gpt_assessment else None,
+            final_decision_source=source,
+            auto_decision=_auto_label(result),
+            risk_flags_json=flags,
+            extracted_rules_json=response.extracted_rule,
+            pipeline_version=PIPELINE_VERSION,
+            latency_ms=response.latency_ms,
+        )
+        self.verification_repository.save_audit(audit)
+        response.audit_id = audit.id
+
+    def _update_claim(self, claim: Claim, response: ClaimVerificationResponse, result: DecisionResult,
+                      category: str | None) -> None:
+        previous_status = claim.status
+        claim.policy_decision = response.status
+        claim.policy_approved_amount = response.approved_amount
+        claim.policy_confidence = Decimal(str(round(response.confidence, 4)))
+        claim.policy_source = response.policy_source
+        claim.policy_reason = response.reason
+        claim.policy_checked_at = datetime.now(timezone.utc)
+        if category and not claim.policy_category:
+            claim.policy_category = category
+
+        if result.autonomous and result.decision in FINAL_DECISIONS and claim.status in _REVIEWABLE_STATUSES:
+            claim.status = claim_status_for(result.decision)
+            claim.final_approved_amount = Decimal("0.00") if result.decision == REJECTED else result.approved_amount
+            claim.reviewed_at = datetime.now(timezone.utc)
+            claim.reviewer_notes = f"Auto-decided by policy engine ({response.confidence:.2f} confidence)"
+            record_claim_event(
+                self.db, claim.id, "CLAIM_AUTO_DECIDED", f"Claim {claim.status.lower()} automatically by the policy engine",
+                status_before=previous_status, status_after=claim.status,
+                metadata={"approved_amount": str(claim.final_approved_amount), "confidence": response.confidence,
+                          "audit_id": response.audit_id},
+            )
+            return
+
+        if claim.status in _REVIEWABLE_STATUSES:
+            needs_attention = result.decision == REJECTED or any(flag in BLOCKING_FLAGS for flag in response.flags)
+            claim.status = "Needs Attention" if needs_attention else "Pending Review"
+        record_claim_event(
+            self.db, claim.id, "POLICY_VERIFIED", f"Policy check recommends: {response.status}",
+            status_before=previous_status, status_after=claim.status,
+            metadata={"recommended_amount": str(response.approved_amount), "confidence": response.confidence,
+                      "flags": response.flags, "audit_id": response.audit_id},
+        )
+
+    # -------------------------------------------------------------- utilisation
+    def _utilization(self, claim: Claim | None, category: str | None, hit: RetrievalHit | None) -> dict[str, Decimal]:
+        if claim is None or claim.user_id is None or not category or not self.settings.rag_use_annual_utilization:
+            return {}
+        paid = func.coalesce(Claim.final_approved_amount, Claim.policy_approved_amount, Claim.amount)
+        base = (
+            self.db.query(func.coalesce(func.sum(paid), 0))
+            .filter(Claim.user_id == claim.user_id)
+            .filter(Claim.id != claim.id)
+            .filter(Claim.policy_category == category)
+            .filter(Claim.status.in_(_PAID_STATUSES))
+        )
+        start, end = _policy_year(claim, hit)
+        year_used = base.filter(Claim.claim_date >= start, Claim.claim_date <= end).scalar() or 0
+        lifetime_used = base.scalar() or 0
+        return {"year": Decimal(str(year_used)), "lifetime": Decimal(str(lifetime_used))}
+
+    # ------------------------------------------------------------------ helpers
     @staticmethod
     def _build_gpt_assessment(gpt_raw: dict, decision_trace: list[str]) -> GPTDecisionAssessment | None:
         if gpt_raw["decision"] == "NOT_RUN":
@@ -306,24 +285,35 @@ class ClaimVerificationService:
             approved_amount=Decimal(gpt_raw["approved_amount"]),
             reason=gpt_raw["reason"],
             risk_flags=gpt_raw["risk_flags"],
+            citations=gpt_raw.get("citations", []),
         )
-        decision_trace.append(
-            f"GPT adjudication: {assessment.decision} ({assessment.confidence:.2f})"
-        )
+        decision_trace.append(f"LLM adjudication: {assessment.decision} ({assessment.confidence:.2f})")
         if assessment.risk_flags:
-            decision_trace.append(f"GPT risk flags: {', '.join(assessment.risk_flags)}")
+            decision_trace.append(f"LLM risk flags: {', '.join(assessment.risk_flags)}")
         return assessment
 
-    @staticmethod
-    def _display_decision(decision: str) -> str:
-        return {
-            "APPROVED": "Approved",
-            "REJECTED": "Rejected",
-            "HUMAN_REVIEW": "Needs Human Review",
-        }.get(decision, "Needs Human Review")
 
-    @staticmethod
-    def _final_reason(engine_reason: str, deterministic_reason: str) -> str:
-        if engine_reason == deterministic_reason:
-            return engine_reason
-        return engine_reason
+def _auto_label(result: DecisionResult) -> str:
+    if not result.autonomous:
+        return "human"
+    return {"APPROVED": "approved", "PARTIALLY_APPROVED": "partial", "REJECTED": "rejected"}.get(result.decision, "human")
+
+
+def _submitted_on(claim: Claim | None) -> date:
+    created = getattr(claim, "created_at", None)
+    if isinstance(created, datetime):
+        return created.date()
+    return date.today()
+
+
+def _policy_year(claim: Claim, hit: RetrievalHit | None) -> tuple[date, date]:
+    reference = claim.claim_date or _submitted_on(claim)
+    if hit is not None:
+        try:
+            start = date.fromisoformat(str(hit.metadata.get("effective_from"))[:10])
+            end = date.fromisoformat(str(hit.metadata.get("effective_to"))[:10])
+            if start <= reference <= end:
+                return start, end
+        except ValueError:
+            pass
+    return date(reference.year, 1, 1), date(reference.year, 12, 31)

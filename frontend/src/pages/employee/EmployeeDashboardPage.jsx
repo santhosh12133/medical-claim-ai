@@ -11,11 +11,12 @@ export function EmployeeDashboardPage() {
     api.get('/claims').then((response) => setClaims(response.data)).catch(() => setClaims([]));
   }, []);
 
-  const pendingClaims = claims.filter((claim) => claim.status !== 'Approved' && claim.status !== 'Rejected').length;
-  const approvedClaims = claims.filter((claim) => claim.status === 'Approved').length;
+  const approvedStatuses = new Set(['Approved', 'Partially Approved']);
+  const pendingClaims = claims.filter((claim) => !approvedStatuses.has(claim.status) && claim.status !== 'Rejected').length;
+  const approvedClaims = claims.filter((claim) => approvedStatuses.has(claim.status)).length;
   const approvedAmount = claims
-    .filter((claim) => claim.status === 'Approved')
-    .reduce((total, claim) => total + Number(claim.amount || 0), 0);
+    .filter((claim) => approvedStatuses.has(claim.status))
+    .reduce((total, claim) => total + Number(claim.final_approved_amount ?? claim.amount ?? 0), 0);
 
   return (
     <>
@@ -33,7 +34,7 @@ export function EmployeeDashboardPage() {
           <article className="metric-card"><p className="eyebrow">Total claims</p><h3>{claims.length}</h3><p className="metric-label">All submissions</p></article>
           <article className="metric-card"><p className="eyebrow">In review</p><h3>{pendingClaims}</h3><p className="metric-label">Awaiting a decision</p></article>
           <article className="metric-card"><p className="eyebrow">Approved</p><h3>{approvedClaims}</h3><p className="metric-label">Successful claims</p></article>
-          <article className="metric-card"><p className="eyebrow">Approved value</p><h3>₹{approvedAmount.toLocaleString('en-IN')}</h3><p className="metric-label">Based on claim totals</p></article>
+          <article className="metric-card"><p className="eyebrow">Approved value</p><h3>₹{approvedAmount.toLocaleString('en-IN')}</h3><p className="metric-label">Amount reimbursed</p></article>
         </div>
       </SectionCard>
 

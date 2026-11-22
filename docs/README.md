@@ -27,6 +27,7 @@ This documentation is intentionally structured like an engineering system of rec
 
 - [AI Decisioning & Safety](ai-decisioning.md) — OCR, extraction, deterministic rules, GPT assessment, decision gates and human review
 - [RAG Architecture](phase2_rag_architecture.md) — policy ingestion, chunking, embeddings, retrieval and verification implementation
+- [RAG Pipeline v2](rag-pipeline.md) — hybrid retrieval, rule extraction, adjudication, safety gate, Q&A and evaluation results
 
 ### 05 — Security and Privacy
 

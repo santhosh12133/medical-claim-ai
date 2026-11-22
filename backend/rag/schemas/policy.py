@@ -56,6 +56,33 @@ class PolicyIngestionResponse(BaseModel):
     chunk_count: int
     collection_name: str
     content_sha256: str
+    superseded_document_ids: list[int] = Field(default_factory=list)
+
+
+class PolicyDocumentSummary(BaseModel):
+    """Policy list item without chunk bodies (the full list can be large)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    source_filename: str
+    policy_type: str
+    policy_version: str
+    department: str
+    status: str
+    effective_from: date | None
+    effective_to: date | None
+    content_sha256: str | None
+    created_at: datetime
+    updated_at: datetime
+    chunk_count: int = 0
+
+
+class PolicyReindexResponse(BaseModel):
+    policy_document_id: int
+    chunk_count: int
+    message: str
 
 
 class PolicyStatusResponse(BaseModel):

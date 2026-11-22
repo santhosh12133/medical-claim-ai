@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import JSON, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 
 from database import Base
 
@@ -28,6 +28,16 @@ class Claim(Base):
     processing_error = Column(Text, nullable=True)
     processing_started_at = Column(DateTime(timezone=True), nullable=True)
     processing_completed_at = Column(DateTime(timezone=True), nullable=True)
+    # --- v2 pipeline: integrity, risk and review metadata ---
+    document_sha256 = Column(String(64), nullable=True, index=True)
+    invoice_number = Column(String(64), nullable=True)
+    patient_name = Column(String(120), nullable=True)
+    policy_category = Column(String(100), nullable=True, index=True)
+    risk_flags_json = Column(JSON, nullable=True)
+    final_approved_amount = Column(Numeric(12, 2), nullable=True)
+    reviewer_notes = Column(Text, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
