@@ -1,0 +1,3 @@
+# Bandit configuration for CI (medium+ severity is enforced).
+# Skips are documented here so every exception is reviewable.
+skips: []

@@ -44,7 +44,7 @@ x-backend-volumes: &backend-volumes
   - policy_uploads:/app/policy_uploads
   - chroma_data:/app/chroma
   - app_logs:/app/logs
-  - model_cache:/root/.cache
+  - model_cache:/home/app/.cache
 
 services:
   db:

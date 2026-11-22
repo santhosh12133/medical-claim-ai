@@ -17,3 +17,7 @@ frontend/dist/
 frontend/.vite/
 **/__pycache__/
 **/*.pyc
+
+# Local frontend overrides (may contain demo credentials)
+frontend/.env.local
+frontend/.env.*.local
