@@ -434,7 +434,7 @@ jobs:
 
   codespaces:
     name: Codespaces devcontainer (built with the Dev Containers CLI)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -459,3 +459,7 @@ jobs:
             PW=$(sudo grep " admin@demo.local " /root/medical-claim-ai-credentials.txt | tail -1 | sed "s/.*password: //")
             sudo deploy/verify-deployment.sh http://localhost admin@demo.local "$PW"
             bash .devcontainer/make-sample-bill.sh'
+
+      - name: Docker daemon log inside the devcontainer
+        if: failure()
+        run: devcontainer exec --workspace-folder . bash -c 'sudo tail -n 60 /tmp/dockerd.log; uname -r' || true
