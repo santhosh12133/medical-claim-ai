@@ -13,8 +13,10 @@ fi
 for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done  # Docker starts with the codespace
 docker info >/dev/null 2>&1 || { echo "Docker is not running in this codespace; rebuild the container"; exit 1; }
 
-sudo bash deploy/setup-server.sh --origin "$ORIGIN" --app-dir "$PWD" --no-update --no-firewall --no-swap \
-  --no-backups --admin-email admin@demo.local --employee-email employee@demo.local --employee-name "Employee Demo" \
+# Demo setting: clean claims are approved automatically; anything flagged goes to the admin review queue.
+# OPENAI_API_KEY / ANTHROPIC_API_KEY (add them as Codespaces secrets) switch on GPT/Claude.
+sudo --preserve-env=OPENAI_API_KEY,ANTHROPIC_API_KEY bash deploy/setup-server.sh --origin "$ORIGIN" --app-dir "$PWD" \
+  --no-update --no-firewall --no-swap --no-backups --auto-decisions on --admin-email admin@demo.local --employee-email employee@demo.local --employee-name "Employee Demo" \
   2>&1 | tee /tmp/medical-claim-ai-start.log
 
 cat <<INFO
@@ -24,6 +26,9 @@ cat <<INFO
 
  Logins (generated for this codespace):
 $(sudo sed 's/^/   /' /root/medical-claim-ai-credentials.txt)
+
+ Automatic decisions: $(grep -q '^AUTO_DECISION_ENABLED=true' .env && echo "ON (clean claims approved; flagged ones go to admin review)" || echo "OFF")
+ GPT/Claude check:    $(grep -q '^GPT_DECISION_ENABLED=true' .env && echo "ON" || echo "OFF (add an OPENAI_API_KEY Codespaces secret to switch it on)")
 
  To share the link: open the PORTS tab, right-click port 80,
  choose "Port Visibility" -> "Public".

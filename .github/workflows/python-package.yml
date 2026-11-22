@@ -167,7 +167,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.key.outputs.present == 'true'
-        run: python -m pip install -r requirements.txt anthropic
+        run: python -m pip install -r requirements.txt
 
       - name: Live LLM adjudication, grounded Q&A and agent planning
         if: steps.key.outputs.present == 'true'
@@ -397,10 +397,19 @@ jobs:
         env:
           CODESPACE_NAME: ci-demo
           GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: app.github.dev
+          OPENAI_API_KEY: sk-ci-placeholder-not-a-real-key   # simulates a Codespaces secret; no call is made
         run: |
+          fail() { echo "[FAIL] $1"; exit 1; }
           python3 -c "import json; json.load(open('.devcontainer/devcontainer.json'))"
           bash .devcontainer/start.sh | tee codespace.log
           grep -q "running at:  https://ci-demo-80.app.github.dev" codespace.log
+          grep -q "Automatic decisions: ON" codespace.log || fail "auto decisions not on"; echo "[PASS] auto decisions on"
+          grep -q "GPT/Claude check:    ON" codespace.log || fail "GPT not switched on"; echo "[PASS] GPT switched on from the secret"
+          [ "$(sudo $COMPOSE exec -T api printenv AUTO_DECISION_ENABLED)" = true ] || fail "API container not in auto mode"
+          [ "$(sudo $COMPOSE exec -T worker printenv GPT_DECISION_ENABLED)" = true ] || fail "worker has GPT off"
+          [ -n "$(sudo $COMPOSE exec -T worker printenv OPENAI_API_KEY)" ] || fail "worker has no key"
+          echo "[PASS] API and worker containers run with auto decisions, GPT and the key"
+          ! grep -q "sk-ci-placeholder" codespace.log || fail "key printed in the log"; echo "[PASS] key not printed"
           ADMIN_PASSWORD=$(sudo grep ' admin@demo.local ' "$CREDS" | tail -1 | sed 's/.*password: //')
           echo "::add-mask::$ADMIN_PASSWORD"
           sudo PUBLIC_ORIGIN=https://ci-demo-80.app.github.dev deploy/verify-deployment.sh http://localhost admin@demo.local "$ADMIN_PASSWORD"

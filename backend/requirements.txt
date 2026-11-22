@@ -17,5 +17,5 @@ openai
 httpx
 # Used by the synthetic invoice generator, benchmarks and tests
 reportlab
-# Optional: LLM_PROVIDER=anthropic requires the Anthropic SDK
-# anthropic
+# LLM_PROVIDER=anthropic (optional)
+anthropic

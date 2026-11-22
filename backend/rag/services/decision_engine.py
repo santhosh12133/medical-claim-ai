@@ -84,6 +84,12 @@ class ClaimDecisionEngine:
                 ["MAX_AMOUNT_EXCEEDED"],
             )
 
+        if ctx.gpt and "GPT_UNAVAILABLE" in (ctx.gpt.get("risk_flags") or []):
+            # The optional LLM check failed (bad key, no credit, outage). Decide on the deterministic result, as if
+            # the LLM were switched off, and record why; _guard_gpt_required still escalates when it's mandatory.
+            ctx.gpt = None
+            ctx.flags.append("GPT_UNAVAILABLE")
+
         if not self.enabled:
             # Advisory mode: report the deterministic recommendation; a human finalises it.
             return DecisionResult(ctx.base, ctx.amount, ctx.confidence, ctx.reason, ctx.flags, autonomous=False)

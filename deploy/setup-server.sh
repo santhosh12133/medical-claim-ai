@@ -17,6 +17,9 @@
 #   --origin URL            the app is already behind another HTTPS proxy at URL (e.g. GitHub Codespaces):
 #                           serve plain HTTP on port 80 and build the website for that address
 #   --public-ip ADDR        use ADDR instead of the detected public IP (e.g. when behind NAT)
+#   --auto-decisions on|off finalise clean claims automatically (on) or leave every decision to an admin (off).
+#                           Flagged or low-confidence claims always go to human review. Default: keep current
+#                           setting (off on a new install)
 #   --no-demo-policies      do not load the 25 synthetic demo reimbursement policies
 #   --app-dir DIR           install directory (default /opt/medical-claim-ai)
 #   --branch NAME           git branch (default main)
@@ -27,6 +30,7 @@
 #
 # Environment (optional): MCA_ADMIN_PASSWORD / MCA_EMPLOYEE_PASSWORD set the new accounts' passwords
 # (12+ characters) instead of generating them. Used by deploy/oracle-cloud-init.sh.
+# OPENAI_API_KEY or ANTHROPIC_API_KEY in the environment switches on the optional LLM features with that key.
 set -euo pipefail
 
 REPO_URL="https://github.com/santhosh12133/medical-claim-ai.git"
@@ -45,6 +49,7 @@ BACKUPS=1
 CREDENTIALS_FILE="/root/medical-claim-ai-credentials.txt"
 PUBLIC_IP_OVERRIDE=""
 ORIGIN_OVERRIDE=""
+AUTO_DECISIONS=""
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARNING: %s\033[0m\n' "$*" >&2; }
@@ -57,6 +62,7 @@ while [ $# -gt 0 ]; do
     --employee-email) EMPLOYEE_EMAIL="${2:?}"; shift 2 ;;
     --employee-name) EMPLOYEE_NAME="${2:?}"; shift 2 ;;
     --domain) DOMAIN="${2:?}"; shift 2 ;;
+    --auto-decisions) AUTO_DECISIONS="${2:?}"; shift 2 ;;
     --no-demo-policies) DEMO_POLICIES=0; shift ;;
     --app-dir) APP_DIR="${2:?}"; shift 2 ;;
     --branch) BRANCH="${2:?}"; shift 2 ;;
@@ -67,7 +73,7 @@ while [ $# -gt 0 ]; do
     --no-backups) BACKUPS=0; shift ;;
     --public-ip) PUBLIC_IP_OVERRIDE="${2:?}"; shift 2 ;;
     --origin) ORIGIN_OVERRIDE="${2%/}"; shift 2 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
 done
@@ -190,9 +196,29 @@ set_env ENVIRONMENT production
 set_env SITE_ADDRESS "$SITE_ADDRESS"
 set_env CORS_ORIGINS "$ORIGIN"
 set_env VITE_API_BASE_URL "$ORIGIN/api"
+case "$AUTO_DECISIONS" in
+  on) set_env AUTO_DECISION_ENABLED true ;;
+  off) set_env AUTO_DECISION_ENABLED false ;;
+  "") ;;
+  *) die "--auto-decisions must be on or off" ;;
+esac
+if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  log "LLM key found in the environment: switching on GPT/Claude adjudication and Q&A"
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    set_env LLM_PROVIDER openai; set_env OPENAI_API_KEY "$OPENAI_API_KEY"
+  else
+    set_env LLM_PROVIDER anthropic; set_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+  fi
+  set_env GPT_DECISION_ENABLED true
+  set_env LLM_QA_ENABLED true
+fi
 WORKERS=$(( CPUS < 4 ? CPUS : 4 ))
 grep -q '^CLAIM_WORKER_CONCURRENCY=' .env || set_env CLAIM_WORKER_CONCURRENCY "$WORKERS"
-grep -q '^AUTO_DECISION_ENABLED=true' .env && warn "AUTO_DECISION_ENABLED=true: claims can be finalised without a reviewer."
+if grep -q '^AUTO_DECISION_ENABLED=true' .env; then
+  echo "Automatic decisions: ON (clean claims are finalised; flagged or uncertain ones go to an admin)"
+else
+  echo "Automatic decisions: OFF (every claim waits for an admin)"
+fi
 
 # ----------------------------------------------------------------------------- start
 log "Building and starting the app (the first build takes 5-15 minutes)"
