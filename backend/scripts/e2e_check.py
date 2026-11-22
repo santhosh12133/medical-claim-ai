@@ -242,7 +242,10 @@ def claim_snapshot(claim_id: int) -> dict:
             "amount": float(claim.amount) if claim.amount is not None else None,
             "treatment": claim.treatment,
             "category": claim.policy_category,
+            "claim_date": claim.claim_date,
+            "user_id": claim.user_id,
             "policy_decision": claim.policy_decision,
+            "policy_reason": claim.policy_reason,
             "final_approved_amount": float(claim.final_approved_amount) if claim.final_approved_amount is not None else None,
             "risk_flags": claim.risk_flags_json or [],
             "agent_outcome": agent.get("outcome"),
@@ -447,7 +450,13 @@ def main() -> int:  # noqa: C901 - linear script
 
     Path(args.report).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     failed = [name for name, case in scenarios.items() if not case.get("passed")]
-    print(json.dumps({key: report[key] for key in ("api", "upload_api", "processing", "decisions")}, indent=2))
+    printed = ("api", "upload_api", "processing_single_thread", "processing", "decisions")
+    print(json.dumps({key: report[key] for key in printed}, indent=2, default=str))
+    for item in report["claims"]:
+        if item["auto_finalised"] and not item["auto_correct"]:
+            print("WRONG AUTO-DECISION:", json.dumps({key: item.get(key) for key in (
+                "doc", "variant", "expected_status", "expected_amount", "status", "final_approved_amount", "amount",
+                "treatment", "category", "user_id", "policy_reason", "claim_date", "risk_flags")}, default=str))
     print("Scenario results:", {name: case.get("passed") for name, case in scenarios.items()})
     print("Semantic search hit@1:", report["semantic_search"]["hit_rate_at_1"])
     if failed:

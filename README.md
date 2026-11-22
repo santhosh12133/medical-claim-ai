@@ -17,6 +17,7 @@ Medical Claim AI is a production-oriented full-stack application that turns medi
 
 - [Why this project](#why-this-project)
 - [Platform at a glance](#platform-at-a-glance)
+- [Verification status (measured)](#verification-status-measured)
 - [Core workflow](#core-workflow)
 - [Architecture](#architecture)
 - [Decision safety model](#decision-safety-model)
@@ -95,6 +96,69 @@ Employee Browser
                          | Vectors |          | GPT       |
                          +---------+          +-----------+
 ```
+
+---
+
+## Verification status (measured)
+
+Every number below comes from a command you can rerun; the full audit with methodology, evidence and
+the resume-claim table is in [`PROJECT_AUDIT_REPORT.md`](PROJECT_AUDIT_REPORT.md).
+
+```mermaid
+flowchart LR
+    U[Employee uploads bill] --> API[FastAPI: auth, type/signature/size checks,<br/>corrupt/blank/duplicate rejection]
+    API --> DB[(PostgreSQL)]
+    API --> Q[Queued claim]
+    Q --> AG{{Claim agent<br/>planner + tool registry}}
+    AG -->|run_ocr| OCR[Tesseract multi-pass OCR<br/>deskew, despeckle, psm 6/4]
+    AG -->|extract_fields| NLP[Rule-based NLP: fields, line items,<br/>entities, per-field voting]
+    AG -->|check_risks| RISK[Duplicates, dates, names,<br/>declared-vs-extracted amount]
+    AG -->|verify_policy| RAG
+    subgraph RAG [Hybrid RAG adjudication]
+      R1[Taxonomy + query expansion] --> R2[Dense MiniLM / Chroma + BM25<br/>RRF + rerank + date filter]
+      R2 --> R3[Rule extraction<br/>caps, co-pay, exclusions, deadlines]
+      R3 --> R4[Deterministic adjudicator<br/>+ annual utilisation]
+      R4 --> R5[Optional LLM cross-check<br/>PII-redacted, must cite]
+      R5 --> R6[Decision engine safety gate]
+    end
+    RAG --> AG
+    AG -->|escalate_to_human| H[Admin review queue<br/>with cited evidence]
+    AG -->|complete| F[Auto-finalised claim]
+    POL[Policy PDFs] --> ING[Page-aware chunking<br/>+ embeddings] --> R2
+```
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Field extraction (OCR + NLP) | **96.0%** field accuracy on 120 held-out synthetic invoices (720 field checks); 90.3% with single-pass OCR | `python scripts/benchmark_extraction.py --seed 101` / `--seed 202`; `backend/eval/extraction_heldout_seeds_101_202.json` |
+| Policy retrieval | hit-rate@1 = 1.0 on 32 labelled claims (BM25-only and hybrid) | `python scripts/evaluate_rag.py [--embeddings]` |
+| Policy decisions | 32/32 correct offline; original pipeline 1/32 (no policy retrieved for 30) | `python scripts/evaluate_rag.py`; [`docs/rag-pipeline.md`](docs/rag-pipeline.md) |
+| End-to-end | PostgreSQL + API + worker + real embeddings, 12 failure scenarios | CI job "End-to-end"; `scripts/e2e_check.py` |
+
+All datasets are **synthetic** (generated invoices, demo policies). They are regression guards, not proof of
+real-world accuracy, throughput or review reduction. See the audit report for what is and is not verified.
+
+### Try it with sample documents
+
+```bash
+cd backend
+alembic upgrade head
+python scripts/seed_demo_users.py          # employee@demo.com / admin@demo.com (demo passwords in the script)
+python -m scripts.seed_demo_policies        # 25 demo reimbursement policies into PostgreSQL + Chroma
+python scripts/benchmark_extraction.py --count 12 --keep ../sample_bills   # writes labelled sample bills
+```
+
+Upload any file from `sample_bills/` (or `backend/sample_invoice.png`) as the employee, then open the admin
+**Review Queue** to see extracted fields, the agent trace, cited policy evidence and the recommendation. Ask
+coverage questions on the **Coverage Assistant** page.
+
+### Known limitations
+
+- Extraction and decision datasets are synthetic; no real (anonymised) bills or insurer policies were evaluated.
+- Field extraction is rule-based NLP (regular expressions + taxonomy), not a trained NER model; skewed scans remain the weakest variant (~80%).
+- The LLM integration (OpenAI/Anthropic) was verified only for graceful failure; no real API key was available, so LLM answers, LLM planning and LLM adjudication are untested against a live model.
+- The production agent uses the deterministic `RulePlanner`; the `LLMPlanner` is implemented and unit-tested with a scripted model only.
+- Throughput was measured on a shared CI runner; real capacity depends on hardware, document mix and worker count.
+- Manual-review reduction depends on `AUTO_DECISION_ENABLED` and its confidence threshold and has not been measured on real claim traffic.
 
 ---
 
@@ -364,9 +428,10 @@ python -m venv .venv
 # activate the virtual environment
 pip install -r requirements.txt
 cp .env.example .env
-python scripts/bootstrap_db.py
+alembic upgrade head                 # or: python scripts/bootstrap_db.py
 python scripts/seed_demo_users.py
-uvicorn main:app --reload
+python -m scripts.seed_demo_policies # optional: demo policy knowledge base
+uvicorn main:app --reload            # Swagger UI at http://localhost:8000/docs
 ```
 
 Start the worker separately:
@@ -618,8 +683,10 @@ Implemented:
 - [x] Decision and processing metrics
 - [x] Docker/Compose deployment
 - [x] Engineering documentation system
-- [ ] Representative labeled OCR evaluation published
-- [ ] Sustained worker-capacity benchmark published
+- [x] Labelled OCR/NLP extraction benchmark published (synthetic invoices, held-out seeds)
+- [x] Worker throughput measured end-to-end in CI (shared runner, synthetic bills)
+- [ ] Evaluation on representative real (anonymised) bills and insurer policies
+- [ ] Live LLM verification with a real API key
 - [ ] Production object storage / managed queue where scale requires it
 - [ ] Hardened browser refresh/session token architecture
 
