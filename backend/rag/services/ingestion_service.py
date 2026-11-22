@@ -12,9 +12,9 @@ from rag.db.models import PolicyChunk, PolicyDocument
 from rag.domain import IngestionResult, PolicyChunkPayload
 from rag.exceptions import PolicyIngestionError
 from rag.repositories.policy_repository import PolicyRepository
-from rag.repositories.vector_repository import ChromaPolicyVectorRepository
 from rag.schemas.policy import PolicyMetadata
 from rag.services.chunking_service import Chunk, ChunkingService
+from rag.services.dense_index import pack_vector
 from rag.services.embedding_service import EmbeddingService
 from rag.services.pdf_parser import PolicyPdfParser
 
@@ -24,7 +24,7 @@ class PolicyIngestionService:
         self,
         db: Session,
         policy_repository: PolicyRepository,
-        vector_repository: ChromaPolicyVectorRepository,
+        vector_repository,
         pdf_parser: PolicyPdfParser,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
@@ -172,6 +172,7 @@ class PolicyIngestionService:
                     vector_id=vector_id,
                     embedding_model=self.settings.rag_embedding_model,
                     metadata_json=chunk_metadata,
+                    embedding=pack_vector(embedding),
                 )
             )
             payloads.append(

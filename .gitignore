@@ -21,3 +21,6 @@ frontend/.vite/
 # Local frontend overrides (may contain demo credentials)
 frontend/.env.local
 frontend/.env.*.local
+
+# Real (even anonymised) bills and their labels never go into git; see backend/eval/real_bills/README.md
+backend/eval/real_bills/private/

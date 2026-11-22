@@ -355,6 +355,7 @@ def rag_health(
     details = {
         "pipeline_version": PIPELINE_VERSION,
         "embedding_model": settings.rag_embedding_model,
+        "vector_backend": settings.rag_vector_backend,
         "hybrid_enabled": settings.rag_hybrid_enabled,
         "reranker": settings.rag_reranker,
         "llm_provider": settings.llm_provider if settings.llm_enabled else None,

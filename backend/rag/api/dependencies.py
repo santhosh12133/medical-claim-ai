@@ -7,7 +7,7 @@ from database import get_db
 from rag.config.settings import RagSettings, get_rag_settings
 from rag.repositories.policy_repository import PolicyRepository
 from rag.repositories.verification_repository import VerificationRepository
-from rag.repositories.vector_repository import ChromaPolicyVectorRepository
+from rag.repositories.vector_store import build_vector_repository
 from rag.services.chunking_service import ChunkingService
 from rag.services.embedding_service import EmbeddingService
 from rag.services.gpt_decision_service import GPTDecisionService
@@ -34,8 +34,8 @@ def get_embedding_service_cached() -> EmbeddingService:
 
 
 @lru_cache(maxsize=1)
-def get_vector_repository_cached() -> ChromaPolicyVectorRepository:
-    return ChromaPolicyVectorRepository(get_rag_settings_cached(), get_embedding_service_cached())
+def get_vector_repository_cached():
+    return build_vector_repository(get_rag_settings_cached(), get_embedding_service_cached())
 
 
 @lru_cache(maxsize=1)
@@ -69,7 +69,7 @@ def get_verification_repository(db: Session = Depends(get_db)) -> VerificationRe
 def get_policy_ingestion_service(
     db: Session = Depends(get_db),
     policy_repository: PolicyRepository = Depends(get_policy_repository),
-    vector_repository: ChromaPolicyVectorRepository = Depends(get_vector_repository_cached),
+    vector_repository=Depends(get_vector_repository_cached),
     pdf_parser: PolicyPdfParser = Depends(get_pdf_parser_cached),
     chunking_service: ChunkingService = Depends(get_chunking_service_cached),
     embedding_service: EmbeddingService = Depends(get_embedding_service_cached),

@@ -7,7 +7,6 @@ PyJWT
 python-multipart
 pytesseract
 rapidocr-onnxruntime
-chromadb
 sentence-transformers
 pypdf
 pydantic-settings

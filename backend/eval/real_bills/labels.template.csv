@@ -1,0 +1,2 @@
+filename,patient_name,hospital_name,amount,claim_date,invoice_number,category,notes
+bill-001.jpg,Patient A,Example Hospital,12500.00,2026-03-14,INV-0001,Dental,"amount = grand total payable, not a line item"

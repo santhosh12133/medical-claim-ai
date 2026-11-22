@@ -35,7 +35,7 @@ from rag.config.settings import get_rag_settings
 from rag.decisions import BLOCKING_FLAGS
 from rag.llm.providers import build_provider
 from rag.repositories.verification_repository import VerificationRepository
-from rag.repositories.vector_repository import ChromaPolicyVectorRepository
+from rag.repositories.vector_store import build_vector_repository
 from rag.services.embedding_service import EmbeddingService
 from rag.services.gpt_decision_service import GPTDecisionService
 from rag.services.retrieval_service import PolicyRetrievalService
@@ -65,7 +65,7 @@ class ClaimWorker:
     def _claim_verification_service(self, db: Session) -> ClaimVerificationService:
         if self._verification_dependencies is None:
             embedding_service = EmbeddingService(self.settings)
-            vector_repository = ChromaPolicyVectorRepository(self.settings, embedding_service)
+            vector_repository = build_vector_repository(self.settings, embedding_service)
             self._verification_dependencies = (
                 PolicyRetrievalService(vector_repository, self.settings),
                 RuleParser(),

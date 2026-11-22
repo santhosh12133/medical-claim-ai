@@ -26,11 +26,13 @@ import io
 import json
 import os
 import random
+import re
 import statistics
 import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -256,6 +258,20 @@ def claim_snapshot(claim_id: int) -> dict:
         }
 
 
+def manual_review_reason(claim: dict) -> str:
+    """Primary reason a claim was left for a person, grouped so the report can say where the remaining work is."""
+    from rag.agent.core import BLOCKING_RISKS
+
+    blocking = sorted(set(claim["risk_flags"]) & BLOCKING_RISKS)
+    if blocking:
+        return "risk: " + ", ".join(blocking)
+    if claim.get("escalation_reason"):
+        return "agent: " + re.sub(r"\d+(\.\d+)?", "N", claim["escalation_reason"])[:120]
+    if claim.get("policy_decision"):
+        return f"policy decision {claim['policy_decision']} held for review (status {claim['status']})"
+    return f"status {claim['status']}"
+
+
 def llm_outage_case(client: httpx.Client, worker_factory, rng: random.Random) -> dict:
     """Real provider call with an invalid key: the pipeline must fall back without crashing."""
     ensure_user("Lakshmi Devi", "llmoutage@e2e.test")
@@ -390,6 +406,8 @@ def main() -> int:  # noqa: C901 - linear script
         "every_claim_has_verification_audit": all(item["verification_audits"] >= 1 or item["agent_outcome"] != "completed"
                                                   for item in outcomes),
         "every_claim_has_agent_trace": all("AGENT_RUN" in item["events"] for item in outcomes),
+        "manual_review_reasons": dict(Counter(manual_review_reason(item) for item in outcomes
+                                              if not item["auto_finalised"]).most_common()),
     }
     report["claims"] = outcomes
 

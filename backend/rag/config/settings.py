@@ -53,6 +53,9 @@ class RagSettings:
     # --- storage ------------------------------------------------------------
     rag_enabled: bool = field(default_factory=lambda: _bool_env("RAG_ENABLED", True))
     rag_upload_dir: Path = field(default_factory=lambda: Path(os.getenv("RAG_UPLOAD_DIR", "policy_uploads")))
+    # "sql" (default): embeddings in the application database; "chroma": optional ChromaDB backend.
+    rag_vector_backend: str = field(default_factory=lambda: _str_env("RAG_VECTOR_BACKEND", "sql").lower())
+    rag_index_probe_seconds: float = field(default_factory=lambda: _float_env("RAG_INDEX_PROBE_SECONDS", 5.0))
     rag_chroma_path: Path = field(default_factory=lambda: Path(os.getenv("RAG_CHROMA_PATH", "chroma")))
     rag_collection_name: str = field(default_factory=lambda: os.getenv("RAG_COLLECTION_NAME", "policy_chunks"))
     rag_embedding_model: str = field(
@@ -129,6 +132,7 @@ class RagSettings:
             (self.rag_rrf_k >= 1, "RAG_RRF_K must be positive"),
             (self.rag_over_limit_policy in {"partial", "reject"}, "RAG_OVER_LIMIT_POLICY must be 'partial' or 'reject'"),
             (self.llm_provider in {"openai", "anthropic"}, "LLM_PROVIDER must be 'openai' or 'anthropic'"),
+            (self.rag_vector_backend in {"sql", "chroma"}, "RAG_VECTOR_BACKEND must be 'sql' or 'chroma'"),
         ]
 
     @property
@@ -151,6 +155,7 @@ def get_rag_settings() -> RagSettings:
     settings = RagSettings()
     settings.validate()
     settings.rag_upload_dir.mkdir(parents=True, exist_ok=True)
-    settings.rag_chroma_path.mkdir(parents=True, exist_ok=True)
+    if settings.rag_vector_backend == "chroma":
+        settings.rag_chroma_path.mkdir(parents=True, exist_ok=True)
     settings.rag_log_dir.mkdir(parents=True, exist_ok=True)
     return settings

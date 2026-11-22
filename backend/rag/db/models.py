@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -37,6 +37,8 @@ class PolicyChunk(Base):
     vector_id = Column(String(128), nullable=False, unique=True, index=True)
     embedding_model = Column(String(200), nullable=False)
     metadata_json = Column(JSON, nullable=False, default=dict)
+    # float32 embedding bytes (SQL vector backend); NULL for chunks indexed before migration 0010.
+    embedding = Column(LargeBinary, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     policy_document = relationship("PolicyDocument", back_populates="chunks")

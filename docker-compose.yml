@@ -7,7 +7,7 @@ x-backend-env: &backend-env
   # --- RAG pipeline ---
   RAG_ENABLED: ${RAG_ENABLED:-true}
   RAG_UPLOAD_DIR: /app/policy_uploads
-  RAG_CHROMA_PATH: /app/chroma
+  RAG_VECTOR_BACKEND: ${RAG_VECTOR_BACKEND:-sql}
   RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-policy_chunks}
   RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
   RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-180}
@@ -42,7 +42,6 @@ x-backend-env: &backend-env
 x-backend-volumes: &backend-volumes
   - claim_uploads:/app/uploads
   - policy_uploads:/app/policy_uploads
-  - chroma_data:/app/chroma
   - app_logs:/app/logs
   - model_cache:/home/app/.cache
 
@@ -126,7 +125,6 @@ volumes:
   postgres_data:
   claim_uploads:
   policy_uploads:
-  chroma_data:
   app_logs:
   model_cache:
 

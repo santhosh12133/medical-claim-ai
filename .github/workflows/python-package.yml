@@ -97,7 +97,7 @@ jobs:
           alembic upgrade head
           alembic current
 
-      - name: Seed users and demo policies (real embeddings into Chroma)
+      - name: Seed users and demo policies (real embeddings into the SQL vector store)
         run: |
           python scripts/seed_demo_users.py
           python -m scripts.seed_demo_policies
@@ -130,6 +130,57 @@ jobs:
             backend/extraction_report_single_pass.json
             backend/api.log
             backend/logs/
+
+  llm-live:
+    name: Live LLM check (runs only when an API key secret is configured)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GPT_DECISION_MODEL: ${{ vars.GPT_DECISION_MODEL }}  # optional repository variable; empty = default model
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+    steps:
+      - name: Report whether a key is configured
+        id: key
+        run: |
+          if [ -n "$OPENAI_API_KEY$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Live LLM check skipped::Add OPENAI_API_KEY or ANTHROPIC_API_KEY under Settings > Secrets and variables > Actions to run it."
+          fi
+
+      - name: Checkout
+        if: steps.key.outputs.present == 'true'
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        if: steps.key.outputs.present == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        if: steps.key.outputs.present == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Live LLM adjudication, grounded Q&A and agent planning
+        if: steps.key.outputs.present == 'true'
+        run: python scripts/llm_live_check.py --json llm_live_report.json
+
+      - name: Upload report
+        if: always() && steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: llm-live-report
+          path: backend/llm_live_report.json
+          if-no-files-found: ignore
 
   frontend:
     runs-on: ubuntu-latest
@@ -169,13 +220,9 @@ jobs:
       - name: Install scanners
         run: python -m pip install pip-audit bandit
 
-      # Accepted risks are listed with their justification in backend/security/accepted-vulnerabilities.md.
-      # Any vulnerability not listed there fails the build.
+      # No ignored advisories: any known vulnerability in a backend dependency fails the build.
       - name: Python dependency vulnerabilities (pip-audit)
-        run: >-
-          pip-audit -r backend/requirements.txt --desc
-          --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
-          --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815
+        run: pip-audit -r backend/requirements.txt --desc
 
       - name: Python static security analysis (bandit, medium+)
         if: always()
