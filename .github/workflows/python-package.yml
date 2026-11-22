@@ -430,6 +430,7 @@ jobs:
           sudo $COMPOSE ps || true
           sudo $COMPOSE logs --no-color > compose.log 2>&1 || true
           tail -n 120 compose.log || true
+          echo "---- API log (last 150 lines)"; sudo $COMPOSE logs --no-color --tail 150 api || true
 
       - name: Upload screenshots and logs
         if: always()

@@ -5,7 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     HOME=/home/app \
     HF_HOME=/home/app/.cache/huggingface \
-    OMP_THREAD_LIMIT=1
+    OMP_THREAD_LIMIT=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr libgomp1 \
