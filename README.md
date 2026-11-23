@@ -295,7 +295,9 @@ See [`docs/ai-decisioning.md`](docs/ai-decisioning.md).
 
 ## Key capabilities
 
-One sign-in page for everyone; the account's role decides which workspace opens. Every decision is shown
+Employees and reviewers sign in on separate pages: `/employee/login` (the site's home page) and
+`/admin/login` (the reviewer portal, in a darker ink colour scheme). Each page accepts only its own kind of
+account and links to the other one, and signing out returns you to your own sign-in page. Every decision is shown
 as a stamp (approved, partially approved, rejected, needs review) with the reason and the policy clause.
 
 ### Employee

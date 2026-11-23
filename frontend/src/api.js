@@ -24,7 +24,7 @@ api.interceptors.response.use(
       window.localStorage.removeItem(TOKEN_KEY);
       window.localStorage.removeItem(USER_KEY);
       if (!window.location.pathname.endsWith('/login')) {
-        window.location.assign('/login');
+        window.location.assign(window.location.pathname.startsWith('/admin') ? '/admin/login' : '/employee/login');
       }
     }
     return Promise.reject(error);

@@ -18,12 +18,11 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        {/* One sign-in page for everyone; the account's role decides where it goes next.
-            The old per-role addresses still work so existing links and bookmarks don't break. */}
-        <Route path="/" element={<SignInPage />} />
-        <Route path="/login" element={<SignInPage />} />
-        <Route path="/employee/login" element={<SignInPage />} />
-        <Route path="/admin/login" element={<SignInPage />} />
+        {/* Separate sign-in portals; each accepts only its own kind of account. */}
+        <Route path="/" element={<Navigate to="/employee/login" replace />} />
+        <Route path="/login" element={<Navigate to="/employee/login" replace />} />
+        <Route path="/employee/login" element={<SignInPage portal="employee" />} />
+        <Route path="/admin/login" element={<SignInPage portal="admin" />} />
 
         <Route element={<ProtectedRoute roles={['employee']} />}>
           <Route path="/employee" element={<EmployeeLayout />}>
@@ -47,7 +46,7 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/employee/login" replace />} />
       </Routes>
     </AuthProvider>
   );

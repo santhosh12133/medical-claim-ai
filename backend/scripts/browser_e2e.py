@@ -61,9 +61,21 @@ def run(frontend: str, bill: Path, out: Path, timeout_ms: int) -> dict:
         expect(page.locator(".form-error")).to_contain_text("don’t match", timeout=10_000)
         step(page, "sign-in-rejects-wrong-password")
 
+        # Separate portals: /login lands on the employee portal, and each portal turns away the other role.
+        expect(page).to_have_url(re.compile(r"/employee/login$"))
+        employee_email = os.getenv("E2E_EMPLOYEE_EMAIL", "employee@demo.com")
+        employee_password = os.getenv("E2E_EMPLOYEE_PASSWORD", "employee123")
+        page.goto(f"{frontend}/admin/login")
+        expect(page.get_by_role("heading", name="Reviewer sign-in")).to_be_visible()
+        page.locator("input").first.fill(employee_email)
+        page.locator('input[type="password"]').fill(employee_password)
+        page.get_by_role("button", name="Sign in").click()
+        expect(page.locator(".form-error")).to_contain_text("employee account", timeout=10_000)
+        expect(page).to_have_url(re.compile(r"/admin/login$"))
+        step(page, "reviewer-portal-rejects-employee-account")
+
         # ---------------------------------------------------------------- employee
-        sign_in(page, "employee", os.getenv("E2E_EMPLOYEE_EMAIL", "employee@demo.com"),
-                os.getenv("E2E_EMPLOYEE_PASSWORD", "employee123"))
+        sign_in(page, "employee", employee_email, employee_password)
         expect(page.locator(".metric-card").first).to_be_visible()
         step(page, "employee-overview")
 

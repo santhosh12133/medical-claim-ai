@@ -454,6 +454,10 @@ password refused, upload with the stamped result, the old status address redirec
 timeline, coverage questions, all claims, approving a claim from the review queue, the policy search test,
 and two phone layouts. It runs against the real backend in the Docker-stack job and on x86 and arm64 servers.
 
+Follow-up (2.4.0): the single sign-in page was split back into an employee page (`/employee/login`) and a
+reviewer page (`/admin/login`); each accepts only its own role. A 15th browser step checks that the reviewer
+page turns away an employee account.
+
 | # | Defect | Severity | Fix |
 | --- | --- | --- | --- |
 | 26 | On arm64 the policy search request hung for 60 s when it followed an earlier model inference on another request thread: the image limited OpenMP to one thread but PyTorch still requested one per core. Reproduced twice on the unchanged code | High on Arm servers (e.g. Oracle Ampere) | `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1` in the image; the same search then took 26 ms (CI run 45063585834) |

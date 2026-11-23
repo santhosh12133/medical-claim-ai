@@ -4,6 +4,16 @@ All notable project changes should be recorded here for human-readable release h
 
 The repository currently uses commit history as the authoritative implementation history. This file establishes the release-facing format for future versioned releases.
 
+## [2.4.0] - 2026-11-23: Separate sign-in pages
+
+### Changed
+
+- Employees and reviewers sign in on separate pages again: `/employee/login` (also where `/` and `/login`
+  go) and `/admin/login`, the reviewer portal with its own colour scheme and wording. Each page accepts only
+  its own kind of account and points the other kind to the right page. Signing out, or an expired session,
+  returns you to the sign-in page for your own workspace.
+- Browser end-to-end test: new step checking that the reviewer page turns away an employee account (15 steps).
+
 ## [2.3.0] - 2026-11-23: Redesigned web app
 
 ### Changed
