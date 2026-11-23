@@ -7,6 +7,9 @@
 #   published, because Docker-published ports bypass the host firewall.
 # - The API trusts X-Forwarded-For from Caddy, so login rate limiting sees each visitor's real address.
 #   Safe only because nothing but Caddy can reach the API port.
+# - Caddy can also serve other apps on the same server: it loads extra site files from /opt/caddy-sites
+#   and joins the shared Docker network "caddy-shared", which those apps' public services join too.
+#   setup-server.sh creates both. Medical Claim AI's own services stay on their private network.
 
 services:
   api:
@@ -29,6 +32,7 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${CADDY_SITES_DIR:-/opt/caddy-sites}:/etc/caddy/sites:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -38,6 +42,12 @@ services:
         condition: service_started
     networks:
       - medical_claims
+      - caddy-shared
+
+networks:
+  caddy-shared:
+    external: true
+    name: caddy-shared
 
 volumes:
   caddy_data:

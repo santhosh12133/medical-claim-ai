@@ -380,6 +380,25 @@ jobs:
           echo "::add-mask::$ADMIN_PASSWORD"
           sudo deploy/verify-deployment.sh http://localhost owner@example.com "$ADMIN_PASSWORD"
 
+      - name: Extra site files are served beside the app (shared Caddy)
+        run: |
+          fail() { echo "[FAIL] $1"; exit 1; }
+          docker network inspect caddy-shared >/dev/null || fail "shared network missing"
+          C=$(sudo docker ps -q --filter label=com.docker.compose.project="$(basename "$GITHUB_WORKSPACE")" --filter label=com.docker.compose.service=caddy)
+          [ -n "$C" ] || fail "Caddy container not found"
+          sudo docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$C" | grep -qw caddy-shared \
+            || fail "Caddy not on caddy-shared"; echo "[PASS] Caddy joined caddy-shared"
+          printf 'http://extra.localhost {\n\trespond "extra site ok"\n}\n' | sudo tee /opt/caddy-sites/ci-extra.caddy >/dev/null
+          sudo docker exec "$C" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          sudo docker exec "$C" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          [ "$(curl -fsS -H 'Host: extra.localhost' http://localhost/)" = "extra site ok" ] || fail "extra site not served"
+          echo "[PASS] extra site served from /opt/caddy-sites"
+          curl -fsS http://localhost/api/health/ready >/dev/null || fail "app broken by the extra site"; echo "[PASS] app still served"
+          sudo rm /opt/caddy-sites/ci-extra.caddy
+          sudo docker exec "$C" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          curl -fsS http://localhost/api/health/ready >/dev/null || fail "app broken after removing the extra site"
+          echo "[PASS] no extra sites is fine"
+
       - name: Password chosen in advance (the Oracle first-boot path)
         run: |
           fail() { echo "[FAIL] $1"; exit 1; }

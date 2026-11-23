@@ -27,3 +27,8 @@
 		format console
 	}
 }
+
+# Other apps on this server add their own site blocks as *.caddy files in the folder mounted at
+# /etc/caddy/sites (host: /opt/caddy-sites). No files is fine. Each app's setup script writes its file and
+# reloads Caddy; this file and Medical Claim AI's own site above stay unchanged.
+import /etc/caddy/sites/*.caddy

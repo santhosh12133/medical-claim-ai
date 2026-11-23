@@ -165,6 +165,32 @@ sudo $C up -d
 | Uploads fail on large files | Limit is 10 MB per bill (`MAX_UPLOAD_SIZE_MB` in `.env`) |
 | Instance stopped by Oracle | Oracle may reclaim Always Free instances that stay idle for a long time. Upgrading the account to Pay-As-You-Go keeps Always Free resources free and avoids reclamation; set a budget alert if you do |
 
+## Hosting another app on the same server
+
+Caddy owns ports 80 and 443, so other apps on this server go through it instead of opening ports of their own:
+
+1. The other app's public containers join the external Docker network **`caddy-shared`**, with service names
+   that can't clash with this app's (`api`, `frontend`, `db`, `worker`, `caddy`), e.g. `civicfix-api`.
+2. Its setup script writes one site block to **`/opt/caddy-sites/<app>.caddy`**, for example
+
+   ```caddyfile
+   otherapp.130-210-5-71.sslip.io {
+   	reverse_proxy otherapp-web:80
+   }
+   ```
+
+3. and reloads Caddy (it checks the file first and keeps the old configuration if it is invalid):
+
+   ```bash
+   C=$(docker ps -q --filter label=com.docker.compose.project=medical-claim-ai --filter label=com.docker.compose.service=caddy)
+   docker exec "$C" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+   docker exec "$C" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+   ```
+
+Each site gets its own free certificate. Re-running this app's `setup-server.sh` keeps every file in
+`/opt/caddy-sites`, so all sites survive updates. If another app is stopped, only its address returns an error.
+Example: [CivicFix](https://github.com/santhosh12133/CivicGuardAI/blob/main/docs/deployment/oracle-cloud.md).
+
 ## Regular VPS instead of Oracle
 
 Any Ubuntu 22.04/24.04 server with **at least 4 GB RAM** (Hetzner, DigitalOcean, Vultr, Hostinger, …) works with
@@ -176,4 +202,5 @@ Installs `git`, `curl`, `openssl`, `cron` and Docker; adds a 4 GB `/swapfile` on
 8 GB RAM; opens 80/443 in `ufw`/`iptables` if they are active; puts the app in `/opt/medical-claim-ai` with a
 `.env` (mode 600) holding random secrets; installs `/etc/cron.d/medical-claim-ai`; saves generated passwords to
 `/root/medical-claim-ai-credentials.txt` (mode 600). Only Caddy listens on the network (80/443): the API,
-website container and database ports are not published. Every option is listed by `setup-server.sh --help`.
+website container and database ports are not published. Creates the Docker network `caddy-shared` and the
+folder `/opt/caddy-sites` so other apps can share Caddy (below); it never deletes files there. Every option is listed by `setup-server.sh --help`.

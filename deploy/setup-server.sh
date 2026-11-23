@@ -220,6 +220,15 @@ else
   echo "Automatic decisions: OFF (every claim waits for an admin)"
 fi
 
+# ----------------------------------------------------------------------------- shared web server
+# Caddy (ports 80/443) can also serve other apps on this server: they drop a site file into
+# $CADDY_SITES_DIR and join the shared network. Both must exist before Caddy starts. Never removes anything.
+CADDY_SITES_DIR="${CADDY_SITES_DIR:-/opt/caddy-sites}"
+mkdir -p "$CADDY_SITES_DIR"
+docker network inspect caddy-shared >/dev/null 2>&1 || docker network create caddy-shared >/dev/null
+EXTRA_SITES=$(find "$CADDY_SITES_DIR" -maxdepth 1 -name '*.caddy' | wc -l)
+[ "$EXTRA_SITES" -eq 0 ] || echo "Also serving $EXTRA_SITES other site(s) from $CADDY_SITES_DIR"
+
 # ----------------------------------------------------------------------------- start
 log "Building and starting the app (the first build takes 5-15 minutes)"
 "${COMPOSE[@]}" up -d --build --remove-orphans --wait --wait-timeout 900 \
