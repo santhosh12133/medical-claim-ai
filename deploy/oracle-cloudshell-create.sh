@@ -6,6 +6,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/santhosh12133/medical-claim-ai/main/deploy/oracle-cloudshell-create.sh -o create.sh
 #   ADMIN_EMAIL='you@example.com' ADMIN_PASSWORD='12+ characters' EMPLOYEE_PASSWORD='12+ characters' bash create.sh
 #
+# Free Ampere capacity is often sold out. RETRY_MINUTES=360 keeps trying (every 2-5 minutes, both sizes) for up to
+# 6 hours; keep the Cloud Shell tab open while it runs.
+#
 # Safe to re-run: existing pieces (network, subnet, VM) are reused, and an existing VM's address is printed.
 set -euo pipefail
 
@@ -17,6 +20,7 @@ EMPLOYEE_EMAIL="${EMPLOYEE_EMAIL:-employee@demo.local}"
 EMPLOYEE_PASSWORD="${EMPLOYEE_PASSWORD:-}"
 EMPLOYEE_NAME="${EMPLOYEE_NAME:-Employee Demo}"
 WORK="$HOME/medical-claim-ai-oci"
+RETRY_MINUTES="${RETRY_MINUTES:-0}"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -118,26 +122,41 @@ JSON
   [ -f "$HOME/.ssh/$NAME.pub" ] || ssh-keygen -q -t rsa -b 4096 -N "" -f "$HOME/.ssh/$NAME" -C "$NAME" \
     || die "Could not create an SSH key"
 
-  log "Creating the VM (Always Free Ampere A1); this takes 1-3 minutes"
+  log "Creating the VM (Always Free Ampere A1)"
   INSTANCE=""
-  for shape in '{"ocpus": 2, "memoryInGBs": 12}' '{"ocpus": 1, "memoryInGBs": 6}'; do
-    echo "Trying $shape"
-    if OUT=$(oci compute instance launch --compartment-id "$C" --availability-domain "$AD" --display-name "$NAME" \
-        --shape VM.Standard.A1.Flex --shape-config "$shape" --image-id "$IMAGE" --subnet-id "$SUBNET" \
-        --assign-public-ip true --boot-volume-size-in-gbs 50 \
-        --user-data-file "$WORK/user-data.sh" --ssh-authorized-keys-file "$HOME/.ssh/$NAME.pub" \
-        --wait-for-state RUNNING 2>"$WORK/launch.err"); then
-      INSTANCE=$(jq -r '.data.id' <<<"$OUT")
-      break
+  DEADLINE=$(( $(date +%s) + RETRY_MINUTES * 60 ))
+  ROUND=0
+  while [ -z "$INSTANCE" ]; do
+    ROUND=$((ROUND + 1))
+    for shape in '{"ocpus": 2, "memoryInGBs": 12}' '{"ocpus": 1, "memoryInGBs": 6}'; do
+      echo "$(date +%H:%M) attempt $ROUND: trying $shape"
+      if OUT=$(oci compute instance launch --compartment-id "$C" --availability-domain "$AD" --display-name "$NAME" \
+          --shape VM.Standard.A1.Flex --shape-config "$shape" --image-id "$IMAGE" --subnet-id "$SUBNET" \
+          --assign-public-ip true --boot-volume-size-in-gbs 50 \
+          --user-data-file "$WORK/user-data.sh" --ssh-authorized-keys-file "$HOME/.ssh/$NAME.pub" \
+          --wait-for-state RUNNING 2>"$WORK/launch.err"); then
+        INSTANCE=$(jq -r '.data.id' <<<"$OUT")
+        break
+      fi
+      if grep -qi "capacity" "$WORK/launch.err"; then
+        echo "      Oracle is out of capacity for this size"
+      elif grep -qi "TooManyRequests" "$WORK/launch.err"; then
+        echo "      Oracle asked to slow down (too many requests); waiting a little longer"
+        sleep 120
+      else
+        cat "$WORK/launch.err" >&2
+        die "The VM could not be created (details above)"
+      fi
+      sleep 15  # don't hit Oracle's rate limit between the two sizes
+    done
+    [ -n "$INSTANCE" ] && break
+    if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+      die "Oracle has no free Ampere capacity in this region right now. Re-run with RETRY_MINUTES=360 to keep trying for 6 hours."
     fi
-    if grep -qi "capacity" "$WORK/launch.err"; then
-      echo "Oracle is out of capacity for this size right now"
-    else
-      cat "$WORK/launch.err" >&2
-      die "The VM could not be created (details above)"
-    fi
+    WAIT=$(( ROUND < 5 ? 120 : 300 ))
+    echo "      Trying again in $((WAIT / 60)) minutes (stops at $(date -d "@$DEADLINE" +%H:%M)). Keep this tab open."
+    sleep "$WAIT"
   done
-  [ -n "$INSTANCE" ] || die "Oracle has no free Ampere capacity in this region at the moment. Re-run this command in an hour; it picks up where it stopped."
 fi
 
 # ------------------------------------------------------------------------------------------- result
