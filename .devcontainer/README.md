@@ -35,3 +35,6 @@ github.com/codespaces when you're done. Your data is kept until you delete the c
 
 If the logins scroll away: `sudo cat /root/medical-claim-ai-credentials.txt`
 To restart the app: `bash .devcontainer/start.sh`
+
+Every start pulls the latest version from `main` first (on a clean checkout), so reopening the codespace
+always runs the newest app. Your claims, accounts and passwords are kept.

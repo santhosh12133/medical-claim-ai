@@ -10,6 +10,13 @@ else
   ORIGIN="${MCA_ORIGIN:-http://localhost}"
 fi
 
+# Pick up the latest version of the app on every start (only on a clean checkout of main, so local edits are
+# never touched). Data, accounts and passwords live in Docker volumes and .env, which this doesn't change.
+if [ "$(git symbolic-ref --short -q HEAD)" = "main" ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+  git pull -q --ff-only origin main && echo "Updated to the latest version: $(git log -1 --format='%h %s')" \
+    || echo "Could not update from GitHub; starting the current version"
+fi
+
 for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done  # Docker starts with the codespace
 docker info >/dev/null 2>&1 || { echo "Docker is not running in this codespace; rebuild the container"; exit 1; }
 
