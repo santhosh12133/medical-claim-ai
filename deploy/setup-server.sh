@@ -223,7 +223,12 @@ fi
 # ----------------------------------------------------------------------------- start
 log "Building and starting the app (the first build takes 5-15 minutes)"
 "${COMPOSE[@]}" up -d --build --remove-orphans --wait --wait-timeout 900 \
-  || { "${COMPOSE[@]}" ps; "${COMPOSE[@]}" logs --tail 80; die "The app did not become healthy; logs above"; }
+  || {
+    "${COMPOSE[@]}" logs --tail 60
+    echo; echo "Service status (the one that is not running/healthy is the problem):"
+    "${COMPOSE[@]}" ps -a --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
+    die "The app did not become healthy. Re-run the same command once (a slow first start can time out); if it fails again, send the status table above."
+  }
 # The website is built for one public address. Compose can keep the old container running after a rebuild
 # (seen on arm64), so always recreate it: it's stateless nginx and restarts in about a second.
 "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 120 frontend
