@@ -9,6 +9,10 @@
 # Free Ampere capacity is often sold out. RETRY_MINUTES=360 keeps trying (every 2-5 minutes, both sizes) for up to
 # 6 hours; keep the Cloud Shell tab open while it runs.
 #
+# USE_TRIAL_CREDITS=1 uses an AMD server (VM.Standard.E5.Flex, then E4.Flex: 1 OCPU / 8 GB) paid from the free trial
+# credits of a new account instead of the Always Free Arm shape. AMD capacity is usually available. Oracle doesn't
+# charge the card unless the account is upgraded; such servers are reclaimed when the 30-day trial ends.
+#
 # Safe to re-run: existing pieces (network, subnet, VM) are reused, and an existing VM's address is printed.
 set -euo pipefail
 
@@ -21,6 +25,7 @@ EMPLOYEE_PASSWORD="${EMPLOYEE_PASSWORD:-}"
 EMPLOYEE_NAME="${EMPLOYEE_NAME:-Employee Demo}"
 WORK="$HOME/medical-claim-ai-oci"
 RETRY_MINUTES="${RETRY_MINUTES:-0}"
+USE_TRIAL_CREDITS="${USE_TRIAL_CREDITS:-0}"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -102,11 +107,17 @@ JSON
 
   # ------------------------------------------------------------------------------------------- VM
   log "Server image and start-up script"
-  IMAGE=$(oci compute image list --compartment-id "$C" --operating-system "Canonical Ubuntu" \
-      --operating-system-version "24.04" --shape VM.Standard.A1.Flex --sort-by TIMECREATED --sort-order DESC --all \
-    | jq -r '[.data[] | select(."display-name" | test("Minimal") | not)][0].id // empty')
-  [ -n "$IMAGE" ] || die "No Ubuntu 24.04 Arm image found in this region"
-  echo "Image: $(oci compute image get --image-id "$IMAGE" | jq -r '.data."display-name"')"
+  if [ "$USE_TRIAL_CREDITS" = 1 ]; then
+    SHAPES=('VM.Standard.E5.Flex|{"ocpus": 1, "memoryInGBs": 8}' 'VM.Standard.E4.Flex|{"ocpus": 1, "memoryInGBs": 8}')
+    echo "Using an AMD server paid from the free trial credits (reclaimed when the trial ends unless you upgrade)"
+  else
+    SHAPES=('VM.Standard.A1.Flex|{"ocpus": 2, "memoryInGBs": 12}' 'VM.Standard.A1.Flex|{"ocpus": 1, "memoryInGBs": 6}')
+  fi
+  image_for() {  # newest non-minimal Ubuntu 24.04 image that runs on shape $1
+    oci compute image list --compartment-id "$C" --operating-system "Canonical Ubuntu" --operating-system-version "24.04" \
+        --shape "$1" --sort-by TIMECREATED --sort-order DESC --all \
+      | jq -r '[.data[] | select(."display-name" | test("Minimal") | not)][0].id // empty'
+  }
 
   curl -fsSL "$REPO_RAW/deploy/oracle-cloud-init.sh" -o "$WORK/user-data.sh"
   sed -i \
@@ -122,16 +133,19 @@ JSON
   [ -f "$HOME/.ssh/$NAME.pub" ] || ssh-keygen -q -t rsa -b 4096 -N "" -f "$HOME/.ssh/$NAME" -C "$NAME" \
     || die "Could not create an SSH key"
 
-  log "Creating the VM (Always Free Ampere A1)"
+  log "Creating the VM"
   INSTANCE=""
   DEADLINE=$(( $(date +%s) + RETRY_MINUTES * 60 ))
   ROUND=0
   while [ -z "$INSTANCE" ]; do
     ROUND=$((ROUND + 1))
-    for shape in '{"ocpus": 2, "memoryInGBs": 12}' '{"ocpus": 1, "memoryInGBs": 6}'; do
-      echo "$(date +%H:%M) attempt $ROUND: trying $shape"
+    for entry in "${SHAPES[@]}"; do
+      SHAPE="${entry%%|*}"; shape="${entry#*|}"
+      IMAGE=$(image_for "$SHAPE")
+      [ -n "$IMAGE" ] || { echo "      No Ubuntu 24.04 image for $SHAPE here; skipping"; continue; }
+      echo "$(date +%H:%M) attempt $ROUND: trying $SHAPE $shape"
       if OUT=$(oci compute instance launch --compartment-id "$C" --availability-domain "$AD" --display-name "$NAME" \
-          --shape VM.Standard.A1.Flex --shape-config "$shape" --image-id "$IMAGE" --subnet-id "$SUBNET" \
+          --shape "$SHAPE" --shape-config "$shape" --image-id "$IMAGE" --subnet-id "$SUBNET" \
           --assign-public-ip true --boot-volume-size-in-gbs 50 \
           --user-data-file "$WORK/user-data.sh" --ssh-authorized-keys-file "$HOME/.ssh/$NAME.pub" \
           --wait-for-state RUNNING 2>"$WORK/launch.err"); then
@@ -151,7 +165,7 @@ JSON
     done
     [ -n "$INSTANCE" ] && break
     if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-      die "Oracle has no free Ampere capacity in this region right now. Re-run with RETRY_MINUTES=360 to keep trying for 6 hours."
+      die "Oracle has no capacity for these shapes right now. Re-run with RETRY_MINUTES=360 to keep trying, or with USE_TRIAL_CREDITS=1 to use an AMD server from the free trial credits."
     fi
     WAIT=$(( ROUND < 5 ? 120 : 300 ))
     echo "      Trying again in $((WAIT / 60)) minutes (stops at $(date -d "@$DEADLINE" +%H:%M)). Keep this tab open."
