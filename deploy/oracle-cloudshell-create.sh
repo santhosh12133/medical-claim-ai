@@ -114,7 +114,9 @@ JSON
     "$WORK/user-data.sh"
   grep -q "^ADMIN_EMAIL=\"$ADMIN_EMAIL\"" "$WORK/user-data.sh" || die "Could not prepare the start-up script"
 
-  [ -f "$HOME/.ssh/$NAME" ] || ssh-keygen -q -t ed25519 -N "" -f "$HOME/.ssh/$NAME" -C "$NAME"
+  # RSA: Oracle Cloud Shell runs in FIPS mode, which refuses ed25519 keys.
+  [ -f "$HOME/.ssh/$NAME.pub" ] || ssh-keygen -q -t rsa -b 4096 -N "" -f "$HOME/.ssh/$NAME" -C "$NAME" \
+    || die "Could not create an SSH key"
 
   log "Creating the VM (Always Free Ampere A1); this takes 1-3 minutes"
   INSTANCE=""
